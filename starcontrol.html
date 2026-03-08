@@ -539,8 +539,8 @@ const SHIP_TYPES = {
     color: '#dd8844', accent: '#ffaa66', dark: '#885522',
     turnSpeed: 0.04, thrust: 0.15, maxSpeed: 3.5, drag: 0.997,
     maxCrew: 30, maxEnergy: 120, energyRegen: 0.3,
-    weapon: { type: 'spread', damage: 1, speed: 6, rate: 15, cost: 8, color: '#66ff88', size: 2 },
-    special: { name: 'Heal', cost: 40, duration: 1 },
+    weapon: { type: 'normal', damage: 1, speed: 7, rate: 12, cost: 5, color: '#66ff88', size: 2 },
+    special: { name: 'BUTT', cost: 8, duration: 1 },
     draw(ship) {
       const f = ship.flash > 0;
       // === Spathi Eluder - clam/mollusk shell, facing backwards ===
@@ -1576,6 +1576,18 @@ class Ship {
         this.specialCooldown = 30;
         sfx.hit();
       }
+    } else if (sp.name === 'BUTT') {
+      // Spathi Backward Utilizing Tracking Torpedo — fires backward, homes on enemy
+      const nx = Math.cos(this.angle - Math.PI/2), ny = Math.sin(this.angle - Math.PI/2);
+      const target = this.isPlayer ? enemyShip : playerShip;
+      projectiles.push({
+        x: this.x - nx * 10, y: this.y - ny * 10,
+        vx: -nx * 6 + this.vx * 0.3, vy: -ny * 6 + this.vy * 0.3,
+        damage: 2, owner: this, color: '#ff8844', size: 3, life: 80,
+        homing: true, target,
+      });
+      this.specialCooldown = 20;
+      sfx.shoot();
     } else if (sp.name === 'Siren') {
       // Syreen siren song - steal crew from enemy
       const target = this.isPlayer ? enemyShip : playerShip;
@@ -1628,10 +1640,14 @@ function updateAI(ship, target) {
   const targetAngle = Math.atan2(dy, dx) + Math.PI / 2;
   const diff = normAngle(targetAngle - ship.angle);
 
-  // Smarter AI: different behaviors based on distance and ship type
+  // SC2-authentic AI: each race fights differently
+  const race = ship.type;
   const isRanged = ship.def.weapon.type === 'beam' || ship.def.weapon.type === 'homing';
   const isFast = ship.def.maxSpeed > 5;
-  const idealDist = isRanged ? 180 : (isFast ? 100 : 120);
+  const isCoward = race === 'spathi' || race === 'zoqfotpik' || race === 'umgah';
+  const isAggressive = race === 'urquan' || race === 'kohrah' || race === 'yehat' || race === 'shofixti';
+  const isErratic = race === 'pkunk' || race === 'orz';
+  const idealDist = isCoward ? 250 : isAggressive ? 60 : isRanged ? 180 : (isFast ? 100 : 120);
 
   // Turn toward target (with lead prediction)
   const leadX = target.x + target.vx * 8;
@@ -1642,19 +1658,32 @@ function updateAI(ship, target) {
   if (leadDiff > 0.08) ship.turnRight();
   else if (leadDiff < -0.08) ship.turnLeft();
 
-  // Movement: approach to ideal distance, retreat if too close
-  if (d > idealDist + 30) {
+  // Movement: race-specific behavior
+  if (isCoward && d < idealDist) {
+    // Cowards run away and fire backward (Spathi style)
+    ship.thrustForward();
+    // Turn AWAY from target
+    const awayAngle = Math.atan2(-dy, -dx) + Math.PI / 2;
+    const awayDiff = normAngle(awayAngle - ship.angle);
+    if (awayDiff > 0.1) ship.turnRight();
+    else if (awayDiff < -0.1) ship.turnLeft();
+  } else if (isErratic) {
+    // Erratic movement — unpredictable (Pkunk/Orz style)
+    ship.thrustForward();
+    if (frame % 20 < 7) ship.turnLeft();
+    else if (frame % 20 < 14) ship.turnRight();
+  } else if (d > idealDist + 30) {
     ship.thrustForward();
   } else if (d < idealDist - 40) {
-    // Strafe/retreat - thrust at an angle away
-    if (Math.random() < 0.3) ship.thrustForward();
+    if (isAggressive) ship.thrustForward(); // aggressive ships keep pressing
+    else if (Math.random() < 0.3) ship.thrustForward();
   } else {
-    // At ideal range - strafe
     if (frame % 60 < 30) ship.thrustForward();
   }
 
   // Fire when aimed at target
-  if (Math.abs(diff) < 0.5 && d < 280) ship.fire();
+  const fireAngle = isCoward ? 1.0 : 0.5; // Cowards fire at wider angles (rear weapons)
+  if (Math.abs(diff) < fireAngle && d < 280) ship.fire();
 
   // Use special more strategically
   if (ship.energy > ship.def.special.cost && ship.specialCooldown <= 0) {
@@ -1670,6 +1699,7 @@ function updateAI(ship, target) {
     else if (ship.def.special.name === 'Furnace' && ship.energy < 30 && ship.crew > 3) ship.useSpecial();
     else if (ship.def.special.name === 'Siren' && d < 150) ship.useSpecial();
     else if (ship.def.special.name === 'Glory' && d < 60 && ship.crew <= 2) ship.useSpecial();
+    else if (ship.def.special.name === 'BUTT' && d < 200) ship.useSpecial();
     else if (ship.def.special.name === 'Reverse' && d < 60) ship.useSpecial();
     else if (d < 80) ship.useSpecial();
   }
@@ -4889,9 +4919,14 @@ function drawLander() {
   const skyColors = {
     Rocky: '#1a0800', Volcanic: '#2a0800', Desert: '#1a1400',
     Water: '#001122', Jungle: '#001808', Ice: '#0a1020',
-    Toxic: '#0a1400', 'Gas Giant': '#0a0000',
+    Toxic: '#0a1400', 'Gas Giant': '#0a0000', Rainbow: '#0a0014',
   };
-  ctx.fillStyle = skyColors[p.type] || '#0a0a0a';
+  if (p.type === 'Rainbow') {
+    const hue = (frame * 0.5) % 360;
+    ctx.fillStyle = `hsl(${hue}, 30%, 5%)`;
+  } else {
+    ctx.fillStyle = skyColors[p.type] || '#0a0a0a';
+  }
   ctx.fillRect(0, 0, W, H);
 
   // Stars in sky (top portion)
@@ -4904,28 +4939,38 @@ function drawLander() {
   const terrColor1 = {
     Rocky: '#664422', Volcanic: '#442211', Desert: '#886633',
     Water: '#224466', Jungle: '#225522', Ice: '#556688',
-    Toxic: '#445522', 'Gas Giant': '#443322',
+    Toxic: '#445522', 'Gas Giant': '#443322', Rainbow: '#444444',
   };
   const terrColor2 = {
     Rocky: '#553311', Volcanic: '#331100', Desert: '#775522',
     Water: '#113355', Jungle: '#114411', Ice: '#445577',
-    Toxic: '#334411', 'Gas Giant': '#332211',
+    Toxic: '#334411', 'Gas Giant': '#332211', Rainbow: '#333333',
   };
 
   // Draw terrain fill
-  ctx.fillStyle = terrColor1[p.type] || '#444';
   for (let sx = 0; sx < W; sx++) {
     const wx = Math.floor(sx + camX);
     if (wx < 0 || wx >= surfaceWidth) continue;
     const th = surfaceTerrain[wx];
+    if (p.type === 'Rainbow') {
+      const hue = (wx * 2 + frame * 0.3) % 360;
+      ctx.fillStyle = `hsl(${hue}, 60%, 30%)`;
+    } else {
+      ctx.fillStyle = terrColor1[p.type] || '#444';
+    }
     ctx.fillRect(sx, surfaceHeight - th, 1, th);
   }
   // Terrain surface line
-  ctx.fillStyle = terrColor2[p.type] || '#333';
   for (let sx = 0; sx < W; sx++) {
     const wx = Math.floor(sx + camX);
     if (wx < 0 || wx >= surfaceWidth) continue;
     const th = surfaceTerrain[wx];
+    if (p.type === 'Rainbow') {
+      const hue = (wx * 2 + frame * 0.3 + 30) % 360;
+      ctx.fillStyle = `hsl(${hue}, 70%, 45%)`;
+    } else {
+      ctx.fillStyle = terrColor2[p.type] || '#333';
+    }
     ctx.fillRect(sx, surfaceHeight - th, 1, 2);
   }
 
@@ -5199,9 +5244,29 @@ function updateCombat() {
         }, 800);
       }
     } else {
-      // Player flagship destroyed — game over
-      crew = 0;
-      setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 800);
+      // Player flagship destroyed
+      if (fleet.length > 1) {
+        // Still have allied ships — switch to fleet select
+        setTimeout(() => {
+          state = 'fleetselect';
+          fleetCursor = 0;
+          crew = Math.max(1, Math.floor(crew * 0.5)); // lose half crew
+          gameMessage = 'Flagship destroyed! Crew escapes to allied ship!';
+          messageTimer = 120;
+        }, 800);
+      } else {
+        // No fleet backup — escape pod back to starbase
+        crew = Math.max(1, Math.floor(crew * 0.3)); // lose most crew
+        minerals = Math.floor(minerals * 0.5); // lose half minerals
+        setTimeout(() => {
+          hyperX = 0; hyperY = 0; hyperVX = 0; hyperVY = 0;
+          state = 'starbase'; starbaseCursor = 0;
+          gameMessage = 'Escape pod! Limped back to starbase. Lost crew and cargo.';
+          messageTimer = 180;
+          music.play('map');
+          sfx.alarm();
+        }, 800);
+      }
     }
   }
   if (!enemyShip.alive && enemyShip.crew === 0) {
