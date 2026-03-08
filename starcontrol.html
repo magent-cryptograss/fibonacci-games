@@ -1547,16 +1547,16 @@ class Ship {
         target.takeDamage(dmg);
       }
       this.crew = 0; this.alive = false;
-      spawnParticles(this.x, this.y, '#ffff44', 30, 6);
-      spawnParticles(this.x, this.y, '#ff8844', 20, 5);
+      spawnParticles(this.x, this.y, '#ffff44', 14, 4);
+      spawnParticles(this.x, this.y, '#ff8844', 8, 3);
       sfx.explode();
     }
   }
   takeDamage(dmg) {
     if (this.shieldTimer > 0) { this.shieldTimer = Math.max(0, this.shieldTimer - 10); return; }
     this.crew -= dmg;
-    this.flash = 6;
-    screenShake = 6;
+    this.flash = 4;
+    screenShake = 3;
     if (this.crew <= 0) { this.crew = 0; this.alive = false; }
   }
   draw(cx, cy) {
@@ -4190,13 +4190,13 @@ function updateCombat() {
     // vs player
     if (p.owner !== playerShip && dist(p.x, p.y, playerShip.x, playerShip.y) < 12 && !p.gravBomb) {
       playerShip.takeDamage(p.damage);
-      spawnParticles(p.x, p.y, '#ff8844', 5, 2);
+      spawnParticles(p.x, p.y, '#ff8844', 3, 1.5);
       projectiles.splice(i, 1); sfx.hit(); continue;
     }
     // vs enemy
     if (p.owner !== enemyShip && dist(p.x, p.y, enemyShip.x, enemyShip.y) < 12 && !p.gravBomb) {
       enemyShip.takeDamage(p.damage);
-      spawnParticles(p.x, p.y, '#ff8844', 5, 2);
+      spawnParticles(p.x, p.y, '#ff8844', 3, 1.5);
       projectiles.splice(i, 1); sfx.hit(); continue;
     }
     // Drone collision
@@ -4236,19 +4236,19 @@ function updateCombat() {
   if (!playerShip.alive) {
     crew = 0;
     sfx.explode();
-    spawnParticles(playerShip.x, playerShip.y, '#ff4400', 30, 5);
-    setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 1500);
+    spawnParticles(playerShip.x, playerShip.y, '#ff4400', 12, 3);
+    setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 800);
     playerShip.alive = true; playerShip.crew = -1; // prevent re-trigger
   }
   if (!enemyShip.alive && enemyShip.crew === 0) {
     sfx.explode();
-    spawnParticles(enemyShip.x, enemyShip.y, enemyShip.def.color, 30, 5);
+    spawnParticles(enemyShip.x, enemyShip.y, enemyShip.def.color, 12, 3);
     enemyShip.crew = -1; // prevent re-trigger
     defeatedAliens.add(dialogue ? dialogue.starIdx : -1);
     crew = playerShip.crew;
     // Check if this was the final boss
     if (enemyShip.type === 'orz' && artifacts >= 3) {
-      setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 2000);
+      setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 1000);
     } else {
       setTimeout(() => {
         // Return to orbit if at a star, hyperspace if random encounter
@@ -4258,7 +4258,7 @@ function updateCombat() {
         gameMessage = `${enemyShip.def.race} defeated! +50 minerals`;
         minerals += 50;
         messageTimer = 90;
-      }, 1500);
+      }, 800);
     }
   }
 }
