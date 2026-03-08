@@ -2967,62 +2967,82 @@ function returnAfterDialogue() {
 let hyperTrail = [];
 
 function drawMap() {
-  const hudH = 28; // SC2 bottom HUD height
+  const hudH = 40; // SC2 bottom HUD bar (taller, like SC2)
   const mapH = H - hudH; // playable map area
+  const spd = Math.hypot(hyperVX, hyperVY);
 
-  // === SC2 HYPERSPACE — black background ===
-  ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, W, H);
+  // === SC2 HYPERSPACE — deep RED void ===
+  // SC2's HyperSpace is famously RED, not black
+  ctx.fillStyle = '#1a0000'; ctx.fillRect(0, 0, W, mapH);
 
-  // === Green grid (SC2's iconic HyperSpace grid) ===
-  // SC2 had bright green grid lines on pure black
-  const gridSz = 50;
-  const gox = ((-mapCamX * MAP_ZOOM) % gridSz + gridSz) % gridSz;
-  const goy = ((-mapCamY * MAP_ZOOM) % gridSz + gridSz) % gridSz;
-  // Thin grid lines
-  ctx.strokeStyle = '#003300'; ctx.lineWidth = 1;
-  for (let gx = gox; gx < W; gx += gridSz) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, mapH); ctx.stroke(); }
-  for (let gy = goy; gy < mapH; gy += gridSz) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
-  // Bright intersections (SC2 had brighter dots at grid crossings)
-  ctx.fillStyle = '#005500';
-  for (let gx = gox; gx < W; gx += gridSz) {
-    for (let gy = goy; gy < mapH; gy += gridSz) {
-      ctx.fillRect(gx, gy, 1, 1);
+  // === Swirling red nebula clouds (the iconic SC2 HyperSpace look) ===
+  // Multiple layers of slowly moving red/crimson clouds
+  const t = frame * 0.006;
+  const ox = mapCamX - W / 2 / MAP_ZOOM, oy = mapCamY - H / 2 / MAP_ZOOM;
+  for (let layer = 0; layer < 3; layer++) {
+    const parallax = 0.02 + layer * 0.01;
+    const cloudAlpha = 0.06 - layer * 0.015;
+    ctx.globalAlpha = cloudAlpha;
+    for (let ci = 0; ci < 12; ci++) {
+      // Deterministic cloud positions that scroll with camera
+      const seed = ci * 137.5 + layer * 47;
+      const cloudBaseX = (seed * 73.1) % 2000 - 200;
+      const cloudBaseY = (seed * 91.3) % 1600 - 200;
+      const cx = cloudBaseX - ox * parallax * MAP_ZOOM;
+      const cy = cloudBaseY - oy * parallax * MAP_ZOOM;
+      // Wrap clouds
+      const wrappedX = ((cx % (W + 200)) + W + 200) % (W + 200) - 100;
+      const wrappedY = ((cy % (mapH + 200)) + mapH + 200) % (mapH + 200) - 100;
+      const cRadius = 40 + (seed % 60);
+      const red = layer === 0 ? '#440000' : layer === 1 ? '#330808' : '#2a0404';
+      ctx.fillStyle = red;
+      ctx.beginPath(); ctx.arc(wrappedX, wrappedY, cRadius, 0, TAU); ctx.fill();
+      // Brighter core
+      ctx.fillStyle = layer === 0 ? '#660000' : '#4a0808';
+      ctx.beginPath(); ctx.arc(wrappedX, wrappedY, cRadius * 0.5, 0, TAU); ctx.fill();
     }
   }
+  ctx.globalAlpha = 1;
 
-  // === HyperSpace streaks (green particles flying past when moving) ===
-  const spd = Math.hypot(hyperVX, hyperVY);
+  // === Subtle red grid (SC2 had faint grid lines in HyperSpace) ===
+  const gridSz = 60;
+  const gox = ((-mapCamX * MAP_ZOOM) % gridSz + gridSz) % gridSz;
+  const goy = ((-mapCamY * MAP_ZOOM) % gridSz + gridSz) % gridSz;
+  ctx.globalAlpha = 0.12;
+  ctx.strokeStyle = '#440000'; ctx.lineWidth = 1;
+  for (let gx = gox; gx < W; gx += gridSz) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, mapH); ctx.stroke(); }
+  for (let gy = goy; gy < mapH; gy += gridSz) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+
+  // === HyperSpace speed streaks (red/orange when moving, like SC2) ===
   if (spd > 0.8) {
-    // Spawn new streak particles
-    for (let i = 0; i < Math.min(3, spd); i++) {
+    for (let i = 0; i < Math.min(4, spd * 1.5); i++) {
+      const colors = ['#ff4422', '#ff6633', '#ff2211', '#cc3311', '#ff8844'];
       hyperTrail.push({
         x: Math.random() * W, y: Math.random() * mapH,
-        len: 2 + spd * 2, life: 8 + Math.floor(Math.random() * 8),
-        angle: hyperAngle + Math.PI, // opposite of travel direction
+        len: 3 + spd * 3, life: 10 + Math.floor(Math.random() * 10),
+        angle: hyperAngle + Math.PI,
+        color: colors[Math.floor(Math.random() * colors.length)]
       });
     }
   }
-  // Draw and update streaks
-  ctx.strokeStyle = '#00aa00'; ctx.lineWidth = 1;
   for (let i = hyperTrail.length - 1; i >= 0; i--) {
-    const t = hyperTrail[i];
-    ctx.globalAlpha = t.life / 16;
+    const tr = hyperTrail[i];
+    ctx.globalAlpha = tr.life / 20;
+    ctx.strokeStyle = tr.color || '#ff4422'; ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(t.x, t.y);
-    ctx.lineTo(t.x + Math.cos(t.angle) * t.len, t.y + Math.sin(t.angle) * t.len);
+    ctx.moveTo(tr.x, tr.y);
+    ctx.lineTo(tr.x + Math.cos(tr.angle) * tr.len, tr.y + Math.sin(tr.angle) * tr.len);
     ctx.stroke();
-    t.x += Math.cos(t.angle) * 2;
-    t.y += Math.sin(t.angle) * 2;
-    t.life--;
-    if (t.life <= 0) hyperTrail.splice(i, 1);
+    tr.x += Math.cos(tr.angle) * 2.5;
+    tr.y += Math.sin(tr.angle) * 2.5;
+    tr.life--;
+    if (tr.life <= 0) hyperTrail.splice(i, 1);
   }
   ctx.globalAlpha = 1;
-  // Cap trail length
-  if (hyperTrail.length > 60) hyperTrail.splice(0, hyperTrail.length - 60);
+  if (hyperTrail.length > 80) hyperTrail.splice(0, hyperTrail.length - 80);
 
-  const ox = mapCamX - W / 2 / MAP_ZOOM, oy = mapCamY - H / 2 / MAP_ZOOM;
-
-  // === Territory spheres of influence (SC2 style — colored filled circles) ===
+  // === Territory spheres of influence (SC2 style — colored circles on red void) ===
   const terr = {};
   for (let i = 0; i < starMap.length; i++) {
     const s = starMap[i];
@@ -3035,147 +3055,189 @@ function drawMap() {
     }
   }
   for (const race in terr) {
-    const t = terr[race];
-    const tcx = (t.minX + t.maxX) / 2, tcy = (t.minY + t.maxY) / 2;
-    const tr = Math.max(140, Math.hypot(t.maxX - t.minX, t.maxY - t.minY) / 2 + 100);
-    const tsx = (tcx - ox) * MAP_ZOOM, tsy = (tcy - oy) * MAP_ZOOM, tsr = tr * MAP_ZOOM;
-    if (tsx < -tsr - 20 || tsx > W + tsr + 20 || tsy < -tsr - 20 || tsy > H + tsr + 20) continue;
+    const tb = terr[race];
+    const tcx = (tb.minX + tb.maxX) / 2, tcy = (tb.minY + tb.maxY) / 2;
+    const tr2 = Math.max(140, Math.hypot(tb.maxX - tb.minX, tb.maxY - tb.minY) / 2 + 100);
+    const tsx = (tcx - ox) * MAP_ZOOM, tsy = (tcy - oy) * MAP_ZOOM, tsr = tr2 * MAP_ZOOM;
+    if (tsx < -tsr - 20 || tsx > W + tsr + 20 || tsy < -tsr - 20 || tsy > mapH + tsr + 20) continue;
     const rc = SHIP_TYPES[race].color;
-    // SC2: solid colored sphere, fairly visible
-    ctx.globalAlpha = 0.08;
+    // SC2: translucent colored sphere
+    ctx.globalAlpha = 0.1;
     ctx.fillStyle = rc;
     ctx.beginPath(); ctx.arc(tsx, tsy, tsr, 0, TAU); ctx.fill();
     // Border ring
-    ctx.globalAlpha = 0.35;
+    ctx.globalAlpha = 0.4;
     ctx.strokeStyle = rc; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(tsx, tsy, tsr, 0, TAU); ctx.stroke();
-    // Race name at top of sphere (SC2 style)
-    ctx.globalAlpha = 0.7;
+    // Race name at center of sphere
+    ctx.globalAlpha = 0.6;
     ctx.fillStyle = rc; ctx.font = '7px monospace'; ctx.textAlign = 'center';
     ctx.fillText(SHIP_TYPES[race].race, tsx, tsy - tsr + 8);
     ctx.textAlign = 'left';
     ctx.globalAlpha = 1;
   }
 
-  // === Stars (SC2 style: small clean colored dots, name below) ===
+  // === Stars (SC2: small bright colored dots on the red void) ===
   for (let i = 0; i < starMap.length; i++) {
     const s = starMap[i];
     const sx = (s.x - ox) * MAP_ZOOM, sy = (s.y - oy) * MAP_ZOOM;
     if (sx < -20 || sx > W + 20 || sy < -20 || sy > mapH + 20) continue;
 
-    // Star dot — just a clean colored pixel dot like SC2
+    // Star glow (subtle)
+    ctx.globalAlpha = 0.15;
     ctx.fillStyle = s.color.fill;
-    const r = (i === 0) ? 3 : 2; // Sol slightly bigger
-    ctx.fillRect(Math.floor(sx) - r + 1, Math.floor(sy), r * 2 - 1, 1); // horizontal line
-    ctx.fillRect(Math.floor(sx), Math.floor(sy) - r + 1, 1, r * 2 - 1); // vertical line
-    ctx.fillRect(Math.floor(sx) - 1, Math.floor(sy) - 1, 3, 3); // center 3x3
+    ctx.beginPath(); ctx.arc(sx, sy, 4, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
 
-    // Star name — SC2 showed constellation name in star's color
+    // Star dot — clean bright pixel cross like SC2
+    ctx.fillStyle = s.color.fill;
+    const r = (i === 0) ? 3 : 2;
+    ctx.fillRect(Math.floor(sx) - 1, Math.floor(sy) - 1, 3, 3); // center
+    ctx.fillRect(Math.floor(sx), Math.floor(sy) - r, 1, r * 2 + 1); // vertical
+    ctx.fillRect(Math.floor(sx) - r, Math.floor(sy), r * 2 + 1, 1); // horizontal
+
+    // Star name in star color
     ctx.fillStyle = s.color.fill; ctx.font = '6px monospace';
     const label = s.name.split(' ');
-    ctx.fillText(label[0], sx + 5, sy + 1);
-    // Constellation suffix below in dimmer color
+    ctx.fillText(label[0], sx + 5, sy + 2);
     if (label[1]) {
-      ctx.fillStyle = '#224422';
-      ctx.fillText(label[1], sx + 5, sy + 8);
+      ctx.globalAlpha = 0.5;
+      ctx.fillText(label[1], sx + 5, sy + 9);
+      ctx.globalAlpha = 1;
     }
 
-    // Sol marker — white circle (SC2's Sol was distinctly marked)
+    // Sol marker
     if (i === 0) {
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(sx, sy, 6, 0, TAU); ctx.stroke();
     }
 
-    // Nearest star highlight — green brackets (SC2's selection cursor)
+    // Selected star cursor — green brackets (SC2 style)
     if (i === selectedStar) {
-      const cr = 9;
-      const bLen = 4;
+      const cr = 9, bLen = 4;
       ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 1;
       ctx.beginPath();
-      // Top-left bracket
       ctx.moveTo(sx - cr, sy - cr + bLen); ctx.lineTo(sx - cr, sy - cr); ctx.lineTo(sx - cr + bLen, sy - cr);
-      // Top-right bracket
       ctx.moveTo(sx + cr - bLen, sy - cr); ctx.lineTo(sx + cr, sy - cr); ctx.lineTo(sx + cr, sy - cr + bLen);
-      // Bottom-left bracket
       ctx.moveTo(sx - cr, sy + cr - bLen); ctx.lineTo(sx - cr, sy + cr); ctx.lineTo(sx - cr + bLen, sy + cr);
-      // Bottom-right bracket
       ctx.moveTo(sx + cr - bLen, sy + cr); ctx.lineTo(sx + cr, sy + cr); ctx.lineTo(sx + cr, sy + cr - bLen);
       ctx.stroke();
     }
   }
 
-  // === Player ship (SC2 — your flagship visible in HyperSpace) ===
+  // === Player ship at center (SC2 — small flagship sprite) ===
   const isThrusting = keys['ArrowUp'] || keys['KeyW'];
   ctx.save();
-  ctx.translate(W/2, H/2);
+  ctx.translate(W/2, (mapH)/2);
   ctx.rotate(hyperAngle + Math.PI / 2);
   ctx.scale(0.5, 0.5);
   SHIP_TYPES.player.draw({ flash: 0, thrusting: isThrusting, def: SHIP_TYPES.player, shieldTimer: 0 });
   ctx.restore();
 
+  // === Thruster flame trail behind ship (SC2 had visible engine glow) ===
+  if (isThrusting) {
+    ctx.globalAlpha = 0.4 + Math.random() * 0.3;
+    ctx.fillStyle = '#ff6622';
+    const flameX = W/2 - Math.cos(hyperAngle) * 8;
+    const flameY = (mapH)/2 - Math.sin(hyperAngle) * 8;
+    ctx.beginPath(); ctx.arc(flameX, flameY, 3 + Math.random() * 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffcc44';
+    ctx.beginPath(); ctx.arc(flameX, flameY, 2, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
   // === SC2 BOTTOM HUD BAR ===
-  // SC2 had a solid dark bar at bottom with green text readouts
-  ctx.fillStyle = '#000800'; ctx.fillRect(0, mapH, W, hudH);
-  // Top border line (bright green)
-  ctx.fillStyle = '#00aa00'; ctx.fillRect(0, mapH, W, 1);
-  // Second darker line
-  ctx.fillStyle = '#004400'; ctx.fillRect(0, mapH + 1, W, 1);
+  // SC2 had a dark panel at bottom with distinct sections
+  ctx.fillStyle = '#0a0a12'; ctx.fillRect(0, mapH, W, hudH);
+  // Top border — bright colored line (SC2 used blue/teal borders)
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(0, mapH, W, 2);
+  ctx.fillStyle = '#112255'; ctx.fillRect(0, mapH + 2, W, 1);
 
-  // Fuel bar (SC2 had a visual fuel gauge)
-  const fuelBarX = 4, fuelBarY = mapH + 5, fuelBarW = 60, fuelBarH = 6;
-  ctx.fillStyle = '#001100'; ctx.fillRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
+  // === LEFT: Ship status panel ===
+  // Fuel gauge (SC2 style — horizontal bar with label)
+  ctx.fillStyle = '#8888aa'; ctx.font = '7px monospace';
+  ctx.fillText('FUEL', 4, mapH + 13);
+  const fuelBarX = 30, fuelBarY = mapH + 7, fuelBarW = 56, fuelBarH = 8;
+  ctx.fillStyle = '#111122'; ctx.fillRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
   const fuelFrac = Math.min(1, fuel / 200);
-  ctx.fillStyle = fuelFrac > 0.25 ? '#00cc00' : '#cc4400';
-  ctx.fillRect(fuelBarX, fuelBarY, fuelBarW * fuelFrac, fuelBarH);
-  ctx.strokeStyle = '#006600'; ctx.strokeRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
-  ctx.fillStyle = '#00ff00'; ctx.font = '7px monospace';
-  ctx.fillText('FUEL', fuelBarX, fuelBarY + fuelBarH + 9);
-  ctx.fillText(fuel.toString(), fuelBarX + fuelBarW + 3, fuelBarY + 6);
+  // SC2 fuel bar was segmented
+  const fuelSegs = Math.floor(fuelFrac * 10);
+  for (let i = 0; i < fuelSegs; i++) {
+    ctx.fillStyle = fuelFrac > 0.25 ? '#22cc44' : '#cc4400';
+    ctx.fillRect(fuelBarX + 1 + i * 5.4, fuelBarY + 1, 4.4, fuelBarH - 2);
+  }
+  ctx.strokeStyle = '#334488'; ctx.lineWidth = 1;
+  ctx.strokeRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
+  ctx.fillStyle = '#44cc66'; ctx.fillText(fuel.toString(), fuelBarX + fuelBarW + 3, mapH + 14);
 
-  // Coordinates (SC2 showed your position in HyperSpace)
-  ctx.fillStyle = '#00cc00'; ctx.font = '7px monospace';
+  // Crew count
+  ctx.fillStyle = '#8888aa'; ctx.fillText('CREW', 4, mapH + 25);
+  ctx.fillStyle = '#44cc66'; ctx.fillText(`${crew}/${maxCrew}`, 34, mapH + 25);
+
+  // Minerals
+  ctx.fillStyle = '#8888aa'; ctx.fillText('RU', 4, mapH + 35);
+  ctx.fillStyle = '#ffcc44'; ctx.fillText(minerals.toString(), 20, mapH + 35);
+
+  // === CENTER: Position & speed readout ===
+  // Vertical separator
+  ctx.fillStyle = '#223366'; ctx.fillRect(105, mapH + 5, 1, hudH - 8);
+
+  ctx.fillStyle = '#6688bb'; ctx.font = '7px monospace';
   const coordX = Math.floor(hyperX / 10), coordY = Math.floor(hyperY / 10);
-  ctx.fillText(`${coordX}, ${coordY}`, 80, mapH + 10);
+  ctx.fillText('POS', 112, mapH + 13);
+  ctx.fillStyle = '#aaccff';
+  ctx.fillText(`${coordX.toString().padStart(4)}.${Math.abs(Math.floor(hyperX % 10))} : ${coordY.toString().padStart(4)}.${Math.abs(Math.floor(hyperY % 10))}`, 132, mapH + 13);
 
-  // Speed indicator
-  ctx.fillStyle = '#008800';
-  ctx.fillText(`SPD:${spd.toFixed(1)}`, 80, mapH + 20);
+  ctx.fillStyle = '#6688bb';
+  ctx.fillText('VEL', 112, mapH + 25);
+  ctx.fillStyle = spd > 4 ? '#ff8844' : '#aaccff';
+  ctx.fillText(spd.toFixed(2), 132, mapH + 25);
 
-  // Resources
-  ctx.fillStyle = '#00ff00';
-  ctx.fillText(`CREW:${crew}/${maxCrew}`, 140, mapH + 10);
-  ctx.fillStyle = '#00cc00';
-  ctx.fillText(`MIN:${minerals}`, 140, mapH + 20);
+  // Heading
+  ctx.fillStyle = '#6688bb';
+  ctx.fillText('HDG', 112, mapH + 35);
+  ctx.fillStyle = '#aaccff';
+  const hdgDeg = Math.floor(((hyperAngle * 180 / Math.PI) % 360 + 360) % 360);
+  ctx.fillText(`${hdgDeg}°`, 132, mapH + 35);
 
-  // Artifacts
-  ctx.fillStyle = '#ffcc00';
-  ctx.fillText(`SEALS:${artifacts}/3`, 210, mapH + 10);
+  // === RIGHT: Star info & artifacts ===
+  ctx.fillStyle = '#223366'; ctx.fillRect(210, mapH + 5, 1, hudH - 8);
 
-  // Nearest star info (SC2 showed info about nearby stars in the HUD)
+  // Artifacts/seals
+  ctx.fillStyle = '#8888aa'; ctx.fillText('SEALS', 218, mapH + 35);
+  ctx.fillStyle = '#ffcc44';
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = i < artifacts ? '#ffcc44' : '#333344';
+    ctx.fillRect(250 + i * 10, mapH + 28, 7, 7);
+  }
+
+  // Nearest star info
   if (selectedStar !== null) {
     const s = starMap[selectedStar];
     const sd = dist(hyperX, hyperY, s.x, s.y);
-    ctx.fillStyle = s.color.fill; ctx.font = '7px monospace';
-    ctx.fillText(s.name, 270, mapH + 10);
-    ctx.fillStyle = '#008800';
-    ctx.fillText(`DIST:${Math.floor(sd)}`, 270, mapH + 20);
-    if (sd < 40) {
-      // Blinking "ENTER" prompt
-      if (Math.floor(frame / 15) % 2) {
-        ctx.fillStyle = '#00ff00';
-        ctx.fillText('SPACE', 330, mapH + 10);
-      }
+    ctx.fillStyle = s.color.fill; ctx.font = '8px monospace';
+    ctx.fillText(s.name, 218, mapH + 13);
+    ctx.fillStyle = '#6688bb'; ctx.font = '7px monospace';
+    ctx.fillText(`DIST ${Math.floor(sd)}`, 218, mapH + 23);
+
+    if (sd < 40 && Math.floor(frame / 15) % 2) {
+      ctx.fillStyle = '#00ff44'; ctx.font = '8px monospace';
+      ctx.fillText('► ENTER', 280, mapH + 13);
     }
     if (s.territory && !defeatedAliens.has(selectedStar)) {
       ctx.fillStyle = SHIP_TYPES[s.territory].color;
-      ctx.fillText(SHIP_TYPES[s.territory].race, 270, mapH + 26);
+      ctx.font = '6px monospace';
+      ctx.fillText(SHIP_TYPES[s.territory].race + ' SPACE', 280, mapH + 23);
     }
+  } else {
+    ctx.fillStyle = '#444466'; ctx.font = '7px monospace';
+    ctx.fillText('NO STAR NEARBY', 218, mapH + 13);
   }
 
   // Message overlay
   if (messageTimer > 0) {
     messageTimer--;
-    ctx.fillStyle = '#ff4444'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff4444'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
     ctx.fillText(gameMessage, W/2, mapH - 20);
     ctx.textAlign = 'left';
   }
