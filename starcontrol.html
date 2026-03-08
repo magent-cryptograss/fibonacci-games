@@ -86,6 +86,18 @@ const sfx = (() => {
         pkunk:     { base: 350, range: 180, type: 'triangle', speed: 55, vol: 0.05 }, // melodic, birdy
         melnorme:  { base: 200, range: 80, type: 'sine', speed: 70, vol: 0.06 }, // smooth, merchant
         human:     { base: 180, range: 60, type: 'sawtooth', speed: 65, vol: 0.05 }, // normal
+        kohrah:    { base: 100, range: 50, type: 'sawtooth', speed: 100, vol: 0.08 }, // deep, menacing
+        yehat:     { base: 200, range: 100, type: 'square', speed: 55, vol: 0.07 }, // sharp, warrior
+        supox:     { base: 380, range: 120, type: 'sine', speed: 60, vol: 0.05 }, // gentle, melodic
+        utwig:     { base: 160, range: 80, type: 'triangle', speed: 90, vol: 0.06 }, // sad, slow
+        thraddash: { base: 250, range: 150, type: 'sawtooth', speed: 40, vol: 0.07 }, // brutish, fast
+        ilwrath:   { base: 140, range: 100, type: 'sawtooth', speed: 70, vol: 0.07 }, // sinister, hissing
+        umgah:     { base: 400, range: 250, type: 'square', speed: 35, vol: 0.06 }, // silly, random
+        vux:       { base: 170, range: 70, type: 'triangle', speed: 80, vol: 0.06 }, // snooty, deliberate
+        arilou:    { base: 500, range: 200, type: 'sine', speed: 45, vol: 0.04 }, // ethereal, high
+        druuge:    { base: 220, range: 90, type: 'sawtooth', speed: 55, vol: 0.07 }, // harsh, merchant
+        syreen:    { base: 320, range: 140, type: 'sine', speed: 50, vol: 0.05 }, // smooth, alluring
+        shofixti:  { base: 350, range: 160, type: 'square', speed: 30, vol: 0.06 }, // excited, fast
       };
       const v = voices[race] || voices.human;
       const syllables = 3 + Math.floor(Math.random() * 4);
@@ -818,6 +830,494 @@ const SHIP_TYPES = {
       }
     },
   },
+  kohrah: {
+    name: 'Marauder', race: 'Kohr-Ah',
+    color: '#441111', accent: '#882222', dark: '#220808',
+    turnSpeed: 0.03, thrust: 0.12, maxSpeed: 3, drag: 0.997,
+    maxCrew: 36, maxEnergy: 100, energyRegen: 0.4,
+    weapon: { type: 'homing', damage: 4, speed: 4, rate: 20, cost: 12, color: '#ff2222', size: 4 },
+    special: { name: 'Fireblade', cost: 25, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Kohr-Ah Marauder - dark angular blade ship
+      ctx.fillStyle = f ? '#fff' : '#110505';
+      ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(-12, 4); ctx.lineTo(-8, 12); ctx.lineTo(8, 12); ctx.lineTo(12, 4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#220808';
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(-10, 4); ctx.lineTo(-6, 10); ctx.lineTo(6, 10); ctx.lineTo(10, 4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#441111';
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-8, 3); ctx.lineTo(-5, 8); ctx.lineTo(5, 8); ctx.lineTo(8, 3); ctx.closePath(); ctx.fill();
+      // Blade arms extending from sides
+      ctx.fillStyle = f ? '#fff' : '#330a0a';
+      ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-18, -6); ctx.lineTo(-14, 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(18, -6); ctx.lineTo(14, 2); ctx.fill();
+      // Central dark eye
+      ctx.fillStyle = f ? '#fff' : '#882222';
+      ctx.beginPath(); ctx.arc(0, -2, 4, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#ff4444';
+      ctx.beginPath(); ctx.arc(0, -2, 2, 0, TAU); ctx.fill();
+      // Hull detail lines
+      ctx.fillStyle = f ? '#fff' : '#330a0a';
+      ctx.fillRect(-6, 2, 12, 1);
+      ctx.fillRect(-4, 5, 8, 1);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#110505';
+      ctx.fillRect(-4, 10, 8, 3);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ff4422'; ctx.fillRect(-3, 13, 6, 3 + Math.random() * 2);
+        ctx.fillStyle = '#ff8866'; ctx.fillRect(-1, 13, 2, 2);
+      }
+    },
+  },
+  yehat: {
+    name: 'Terminator', race: 'Yehat',
+    color: '#aa4422', accent: '#cc6644', dark: '#662211',
+    turnSpeed: 0.08, thrust: 0.3, maxSpeed: 6, drag: 0.993,
+    maxCrew: 20, maxEnergy: 90, energyRegen: 0.5,
+    weapon: { type: 'spread', damage: 2, speed: 9, rate: 8, cost: 4, color: '#ff8844', size: 2 },
+    special: { name: 'Shield', cost: 20, duration: 45 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Yehat Terminator - angular pterodactyl wing ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-6, 8); ctx.lineTo(6, 8); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(-5, 7); ctx.lineTo(5, 7); ctx.fill();
+      // Wide swept wings
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(-4, -2); ctx.lineTo(-18, -8); ctx.lineTo(-14, 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4, -2); ctx.lineTo(18, -8); ctx.lineTo(14, 4); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(-5, -1); ctx.lineTo(-15, -6); ctx.lineTo(-12, 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5, -1); ctx.lineTo(15, -6); ctx.lineTo(12, 2); ctx.fill();
+      // Cockpit
+      ctx.fillStyle = f ? '#fff' : '#ffcc44';
+      ctx.fillRect(-2, -6, 4, 3);
+      ctx.fillStyle = f ? '#fff' : '#ffee88';
+      ctx.fillRect(-1, -5, 2, 1);
+      // Dual cannon mounts on wings
+      ctx.fillStyle = f ? '#fff' : '#444';
+      ctx.fillRect(-16, -7, 2, 4);
+      ctx.fillRect(14, -7, 2, 4);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#441100';
+      ctx.fillRect(-3, 7, 6, 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ff6622'; ctx.fillRect(-2, 9, 4, 3 + Math.random() * 2);
+        ctx.fillStyle = '#ffaa66'; ctx.fillRect(-1, 9, 2, 2);
+      }
+      // Shield bubble
+      if (ship.shieldTimer > 0) {
+        ctx.globalAlpha = 0.3 + Math.sin(frame * 0.2) * 0.1;
+        ctx.strokeStyle = '#ff8844'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, 20, 0, TAU); ctx.stroke();
+        ctx.lineWidth = 1; ctx.globalAlpha = 1;
+      }
+    },
+  },
+  supox: {
+    name: 'Blade', race: 'Supox',
+    color: '#44aa22', accent: '#66cc44', dark: '#226611',
+    turnSpeed: 0.06, thrust: 0.22, maxSpeed: 5, drag: 0.994,
+    maxCrew: 16, maxEnergy: 80, energyRegen: 0.5,
+    weapon: { type: 'laser', damage: 2, speed: 9, rate: 8, cost: 4, color: '#88ff44', size: 3 },
+    special: { name: 'Reverse', cost: 10, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Supox Blade - leaf/plant shaped ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(-8, 0); ctx.lineTo(-6, 10); ctx.lineTo(0, 12); ctx.lineTo(6, 10); ctx.lineTo(8, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-6, 0); ctx.lineTo(-4, 9); ctx.lineTo(0, 10); ctx.lineTo(4, 9); ctx.lineTo(6, 0); ctx.closePath(); ctx.fill();
+      // Leaf vein pattern
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-1, -10, 2, 18);
+      ctx.fillStyle = f ? '#fff' : '#338811';
+      ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(-5, 0); ctx.lineTo(0, -4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(5, 0); ctx.lineTo(0, -4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-4, 6); ctx.lineTo(0, 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(4, 6); ctx.lineTo(0, 2); ctx.fill();
+      // Flower cockpit
+      ctx.fillStyle = f ? '#fff' : '#ffcc22';
+      ctx.beginPath(); ctx.arc(0, -4, 3, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#ffee66';
+      ctx.beginPath(); ctx.arc(0, -4, 1.5, 0, TAU); ctx.fill();
+      if (ship.thrusting) {
+        ctx.fillStyle = '#88ff44'; ctx.fillRect(-2, 12, 4, 2 + Math.random() * 2);
+      }
+    },
+  },
+  utwig: {
+    name: 'Jugger', race: 'Utwig',
+    color: '#8844aa', accent: '#aa66cc', dark: '#552277',
+    turnSpeed: 0.04, thrust: 0.15, maxSpeed: 3.5, drag: 0.996,
+    maxCrew: 28, maxEnergy: 120, energyRegen: 0.4,
+    weapon: { type: 'beam', damage: 3, speed: 10, rate: 14, cost: 8, color: '#cc88ff', size: 3 },
+    special: { name: 'Absorb', cost: 0, duration: 50 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Utwig Jugger - heavy masked/armored ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-9, -12, 18, 24);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-7, -10, 14, 20);
+      // Mask face on front
+      ctx.fillStyle = f ? '#fff' : '#ddaa22';
+      ctx.fillRect(-5, -10, 10, 8);
+      ctx.fillStyle = f ? '#fff' : '#ffcc44';
+      ctx.fillRect(-4, -9, 8, 6);
+      // Mask eye slits
+      ctx.fillStyle = f ? '#fff' : '#220088';
+      ctx.fillRect(-3, -8, 2, 2);
+      ctx.fillRect(1, -8, 2, 2);
+      // Mask mouth
+      ctx.fillStyle = f ? '#fff' : '#442200';
+      ctx.fillRect(-2, -5, 4, 1);
+      // Side armor plates
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-12, -6, 4, 12);
+      ctx.fillRect(8, -6, 4, 12);
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-11, -4, 2, 8);
+      ctx.fillRect(9, -4, 2, 8);
+      // Gold trim
+      ctx.fillStyle = f ? '#fff' : '#ddaa22';
+      ctx.fillRect(-8, -12, 16, 1);
+      ctx.fillRect(-8, 9, 16, 1);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#331155';
+      ctx.fillRect(-5, 10, 10, 3);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#aa66ff'; ctx.fillRect(-3, 13, 6, 3 + Math.random() * 2);
+        ctx.fillStyle = '#cc99ff'; ctx.fillRect(-1, 13, 2, 2);
+      }
+      // Absorb shield
+      if (ship.shieldTimer > 0) {
+        ctx.globalAlpha = 0.35 + Math.sin(frame * 0.15) * 0.15;
+        ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, 18, 0, TAU); ctx.stroke();
+        ctx.lineWidth = 1; ctx.globalAlpha = 1;
+      }
+    },
+  },
+  thraddash: {
+    name: 'Torch', race: 'Thraddash',
+    color: '#cc6622', accent: '#ee8844', dark: '#884411',
+    turnSpeed: 0.07, thrust: 0.28, maxSpeed: 6, drag: 0.992,
+    maxCrew: 14, maxEnergy: 70, energyRegen: 0.6,
+    weapon: { type: 'laser', damage: 2, speed: 7, rate: 10, cost: 5, color: '#ff6622', size: 3 },
+    special: { name: 'Afterburner', cost: 15, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Thraddash Torch - chunky brutish ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-6, -10, 12, 18);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-5, -9, 10, 16);
+      // Pointed nose
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(-5, -10); ctx.lineTo(5, -10); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-3, -9); ctx.lineTo(3, -9); ctx.fill();
+      // Stubby side engines
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-10, 0, 5, 8);
+      ctx.fillRect(5, 0, 5, 8);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-9, 1, 3, 6);
+      ctx.fillRect(6, 1, 3, 6);
+      // Flame weapon port
+      ctx.fillStyle = f ? '#fff' : '#ff4400';
+      ctx.fillRect(-2, -13, 4, 3);
+      // Cockpit
+      ctx.fillStyle = f ? '#fff' : '#ffaa44';
+      ctx.fillRect(-2, -6, 4, 3);
+      // Hull stripes
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-4, -2, 8, 1);
+      ctx.fillRect(-4, 3, 8, 1);
+      // Rear engine
+      ctx.fillStyle = f ? '#fff' : '#663300';
+      ctx.fillRect(-4, 8, 8, 2);
+      if (ship.thrusting) {
+        const flicker = Math.random() * 3;
+        ctx.fillStyle = '#ff6622'; ctx.fillRect(-3, 10, 6, 3 + flicker);
+        ctx.fillStyle = '#ff4400'; ctx.fillRect(-9, 8, 3, 2 + flicker);
+        ctx.fillRect(6, 8, 3, 2 + flicker);
+      }
+    },
+  },
+  ilwrath: {
+    name: 'Avenger', race: 'Ilwrath',
+    color: '#662288', accent: '#884488', dark: '#331144',
+    turnSpeed: 0.06, thrust: 0.2, maxSpeed: 4.5, drag: 0.995,
+    maxCrew: 22, maxEnergy: 80, energyRegen: 0.5,
+    weapon: { type: 'laser', damage: 2, speed: 5, rate: 4, cost: 2, color: '#ff4488', size: 4 },
+    special: { name: 'Cloak', cost: 20, duration: 120 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Ilwrath Avenger - spider/bat wing dark ship
+      if (ship.shieldTimer > 0 && !ship.isPlayer) {
+        // Cloaked - barely visible shimmer
+        ctx.globalAlpha = 0.08 + Math.sin(frame * 0.1) * 0.04;
+      }
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-5, 8); ctx.lineTo(5, 8); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(-4, 6); ctx.lineTo(4, 6); ctx.fill();
+      // Bat wings with jagged edges
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(-4, -2); ctx.lineTo(-16, -10); ctx.lineTo(-12, -2); ctx.lineTo(-18, 2); ctx.lineTo(-10, 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4, -2); ctx.lineTo(16, -10); ctx.lineTo(12, -2); ctx.lineTo(18, 2); ctx.lineTo(10, 4); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(-5, -1); ctx.lineTo(-13, -7); ctx.lineTo(-10, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5, -1); ctx.lineTo(13, -7); ctx.lineTo(10, 0); ctx.fill();
+      // Spider eyes (multiple small red dots)
+      if (!f) {
+        ctx.fillStyle = '#ff0044';
+        ctx.fillRect(-2, -6, 1, 1); ctx.fillRect(1, -6, 1, 1);
+        ctx.fillRect(-3, -4, 1, 1); ctx.fillRect(2, -4, 1, 1);
+      }
+      // Engine
+      if (ship.thrusting) {
+        ctx.fillStyle = '#8844aa'; ctx.fillRect(-2, 8, 4, 2 + Math.random() * 2);
+      }
+      if (ship.shieldTimer > 0 && !ship.isPlayer) ctx.globalAlpha = 1;
+    },
+  },
+  umgah: {
+    name: 'Drone', race: 'Umgah',
+    color: '#dd8899', accent: '#ffaabb', dark: '#aa5566',
+    turnSpeed: 0.05, thrust: 0.18, maxSpeed: 4, drag: 0.995,
+    maxCrew: 18, maxEnergy: 80, energyRegen: 0.5,
+    weapon: { type: 'beam', damage: 2, speed: 6, rate: 6, cost: 3, color: '#ff88cc', size: 4 },
+    special: { name: 'Reverse', cost: 8, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      const pulse = Math.sin(frame * 0.06) * 1.5;
+      // Umgah Drone - blobby organic fleshy ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, 0, 11 + pulse, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, -1, 9, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(1, -2, 5, 0, TAU); ctx.fill();
+      // Fleshy tendrils
+      if (!f) {
+        ctx.fillStyle = '#cc6677';
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * TAU + frame * 0.03;
+          ctx.fillRect(Math.cos(a) * 10, Math.sin(a) * 10, 3, 3);
+        }
+      }
+      // Comical eye
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-2, -3, 4, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(-2, -3, 2, 0, TAU); ctx.fill();
+      // Grin
+      ctx.fillStyle = '#993355';
+      ctx.beginPath(); ctx.arc(0, 2, 4, 0.2, Math.PI - 0.2); ctx.fill();
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ff88aa'; ctx.fillRect(-2, 10, 4, 2 + Math.random() * 2);
+      }
+    },
+  },
+  vux: {
+    name: 'Intruder', race: 'VUX',
+    color: '#44aa66', accent: '#66cc88', dark: '#226633',
+    turnSpeed: 0.03, thrust: 0.1, maxSpeed: 2.5, drag: 0.998,
+    maxCrew: 24, maxEnergy: 90, energyRegen: 0.4,
+    weapon: { type: 'beam', damage: 3, speed: 12, rate: 15, cost: 8, color: '#44ff88', size: 3 },
+    special: { name: 'Limpet', cost: 15, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // VUX Intruder - bulky tentacled ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-8, -10, 16, 20);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-6, -8, 12, 16);
+      // Rounded front
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, -10, 8, Math.PI, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, -10, 6, Math.PI, TAU); ctx.fill();
+      // Tentacle appendages
+      ctx.fillStyle = f ? '#fff' : '#338855';
+      const tw = Math.sin(frame * 0.08) * 2;
+      ctx.fillRect(-12 + tw, -4, 5, 3);
+      ctx.fillRect(7 - tw, -4, 5, 3);
+      ctx.fillRect(-14 + tw, 2, 6, 2);
+      ctx.fillRect(8 - tw, 2, 6, 2);
+      // Laser emitter
+      ctx.fillStyle = f ? '#fff' : '#22ff66';
+      ctx.fillRect(-2, -15, 4, 5);
+      ctx.fillStyle = f ? '#fff' : '#88ffaa';
+      ctx.fillRect(-1, -14, 2, 3);
+      // Bridge window
+      ctx.fillStyle = f ? '#fff' : '#88ffaa';
+      ctx.fillRect(-3, -8, 6, 3);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#114422';
+      ctx.fillRect(-5, 10, 10, 3);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#44ff66'; ctx.fillRect(-3, 13, 6, 2 + Math.random() * 2);
+      }
+    },
+  },
+  arilou: {
+    name: 'Skiff', race: 'Arilou',
+    color: '#88bbff', accent: '#aaddff', dark: '#4477cc',
+    turnSpeed: 0.12, thrust: 0.4, maxSpeed: 8, drag: 0.99,
+    maxCrew: 6, maxEnergy: 60, energyRegen: 0.8,
+    weapon: { type: 'laser', damage: 1, speed: 12, rate: 4, cost: 2, color: '#aaddff', size: 2 },
+    special: { name: 'Teleport', cost: 15, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Arilou Skiff - tiny saucer
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.ellipse(0, 0, 10, 5, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.ellipse(0, -1, 8, 4, 0, 0, TAU); ctx.fill();
+      // Dome on top
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(0, -3, 4, Math.PI, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#ddeeff';
+      ctx.beginPath(); ctx.arc(0, -3, 2.5, Math.PI, TAU); ctx.fill();
+      // Rim lights
+      if (!f) {
+        const blink = Math.floor(frame / 8) % 4;
+        ctx.fillStyle = '#aaddff';
+        ctx.fillRect(-8 + blink * 4, 0, 2, 1);
+        ctx.fillRect(2 + blink * 2, 0, 2, 1);
+      }
+      // Bottom glow
+      ctx.fillStyle = f ? '#fff' : '#4477cc';
+      ctx.fillRect(-3, 3, 6, 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#88bbff'; ctx.fillRect(-4, 4, 8, 2 + Math.random() * 2);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#aaddff'; ctx.fillRect(-3, 6, 6, 2);
+        ctx.globalAlpha = 1;
+      }
+    },
+  },
+  druuge: {
+    name: 'Mauler', race: 'Druuge',
+    color: '#aa6622', accent: '#cc8844', dark: '#664411',
+    turnSpeed: 0.04, thrust: 0.15, maxSpeed: 3.5, drag: 0.996,
+    maxCrew: 20, maxEnergy: 100, energyRegen: 0.3,
+    weapon: { type: 'laser', damage: 4, speed: 12, rate: 22, cost: 12, color: '#ffaa44', size: 4 },
+    special: { name: 'Furnace', cost: 0, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Druuge Mauler - boxy industrial cannon ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-7, -8, 14, 20);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-5, -6, 10, 16);
+      // Massive cannon barrel extending forward
+      ctx.fillStyle = f ? '#fff' : '#554422';
+      ctx.fillRect(-3, -18, 6, 12);
+      ctx.fillStyle = f ? '#fff' : '#443311';
+      ctx.fillRect(-2, -20, 4, 14);
+      // Cannon muzzle
+      ctx.fillStyle = f ? '#fff' : '#332211';
+      ctx.fillRect(-3, -20, 6, 2);
+      // Industrial details - rivets
+      if (!f) {
+        ctx.fillStyle = '#886633';
+        ctx.fillRect(-4, -4, 2, 2); ctx.fillRect(2, -4, 2, 2);
+        ctx.fillRect(-4, 4, 2, 2); ctx.fillRect(2, 4, 2, 2);
+      }
+      // Furnace glow (belly)
+      ctx.fillStyle = f ? '#fff' : '#ff4400';
+      ctx.fillRect(-3, 4, 6, 3);
+      ctx.fillStyle = f ? '#fff' : '#ff8844';
+      ctx.fillRect(-2, 5, 4, 1);
+      // Side pipes
+      ctx.fillStyle = f ? '#fff' : '#553311';
+      ctx.fillRect(-9, -2, 3, 8);
+      ctx.fillRect(6, -2, 3, 8);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#442200';
+      ctx.fillRect(-4, 12, 8, 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ff6622'; ctx.fillRect(-3, 14, 6, 3 + Math.random() * 2);
+      }
+    },
+  },
+  syreen: {
+    name: 'Penetrator', race: 'Syreen',
+    color: '#4488cc', accent: '#66aaee', dark: '#225588',
+    turnSpeed: 0.06, thrust: 0.22, maxSpeed: 5, drag: 0.994,
+    maxCrew: 18, maxEnergy: 80, energyRegen: 0.5,
+    weapon: { type: 'laser', damage: 2, speed: 9, rate: 10, cost: 5, color: '#88ccff', size: 3 },
+    special: { name: 'Siren', cost: 20, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Syreen Penetrator - sleek elegant ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(-6, 0); ctx.lineTo(-4, 12); ctx.lineTo(4, 12); ctx.lineTo(6, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(-4, 0); ctx.lineTo(-3, 10); ctx.lineTo(3, 10); ctx.lineTo(4, 0); ctx.closePath(); ctx.fill();
+      // Elegant curved nacelles
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(-5, -4); ctx.lineTo(-12, -2); ctx.lineTo(-10, 6); ctx.lineTo(-5, 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5, -4); ctx.lineTo(12, -2); ctx.lineTo(10, 6); ctx.lineTo(5, 4); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-10, 0, 3, 3);
+      ctx.fillRect(7, 0, 3, 3);
+      // Cockpit - blue glow
+      ctx.fillStyle = f ? '#fff' : '#aaddff';
+      ctx.fillRect(-2, -10, 4, 4);
+      ctx.fillStyle = f ? '#fff' : '#ddeeff';
+      ctx.fillRect(-1, -9, 2, 2);
+      // Hull highlight
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-1, -8, 2, 14);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#113366';
+      ctx.fillRect(-3, 10, 6, 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#4488ff'; ctx.fillRect(-2, 12, 4, 3 + Math.random() * 2);
+        ctx.fillStyle = '#88bbff'; ctx.fillRect(-1, 12, 2, 2);
+      }
+    },
+  },
+  shofixti: {
+    name: 'Scout', race: 'Shofixti',
+    color: '#aa8844', accent: '#ccaa66', dark: '#665522',
+    turnSpeed: 0.1, thrust: 0.35, maxSpeed: 7.5, drag: 0.99,
+    maxCrew: 6, maxEnergy: 40, energyRegen: 0.7,
+    weapon: { type: 'scatter', damage: 1, speed: 8, rate: 4, cost: 2, color: '#ffcc44', size: 2 },
+    special: { name: 'Glory', cost: 40, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Shofixti Scout - tiny nimble ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-5, 6); ctx.lineTo(5, 6); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(-4, 5); ctx.lineTo(4, 5); ctx.fill();
+      // Small stubby wings
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-9, -1, 5, 4);
+      ctx.fillRect(4, -1, 5, 4);
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-8, 0, 3, 2);
+      ctx.fillRect(5, 0, 3, 2);
+      // Cockpit
+      ctx.fillStyle = f ? '#fff' : '#ffdd88';
+      ctx.fillRect(-1, -5, 2, 3);
+      // Nose gun
+      ctx.fillStyle = f ? '#fff' : '#888';
+      ctx.fillRect(-1, -10, 2, 3);
+      // Engine
+      ctx.fillStyle = f ? '#fff' : '#443300';
+      ctx.fillRect(-2, 5, 4, 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ffaa22'; ctx.fillRect(-2, 7, 4, 3 + Math.random() * 2);
+        ctx.fillStyle = '#ffcc66'; ctx.fillRect(-1, 7, 2, 2);
+      }
+    },
+  },
 };
 
 // ==================== COMBAT SHIP ====================
@@ -985,6 +1485,71 @@ class Ship {
       }
       this.specialCooldown = 60;
       sfx.alarm();
+    } else if (sp.name === 'Fireblade') {
+      // Kohr-Ah spinning blade
+      for (let bi = 0; bi < 6; bi++) {
+        const ba = (bi / 6) * TAU;
+        projectiles.push({ x: this.x, y: this.y, vx: Math.cos(ba) * 5, vy: Math.sin(ba) * 5, damage: 3, owner: this, color: '#ff2222', size: 4, life: 50 });
+      }
+      this.specialCooldown = 90;
+      sfx.alarm();
+    } else if (sp.name === 'Reverse') {
+      // Supox/Umgah reverse thrust
+      const nx = Math.cos(this.angle - Math.PI/2), ny = Math.sin(this.angle - Math.PI/2);
+      this.vx -= nx * 6; this.vy -= ny * 6;
+      this.specialCooldown = 30;
+      spawnParticles(this.x, this.y, '#88ff44', 6, 2);
+      sfx.thrust();
+    } else if (sp.name === 'Absorb') {
+      // Utwig absorb shield - absorbs incoming fire into energy
+      this.shieldTimer = sp.duration;
+      this.specialCooldown = sp.duration + 20;
+      sfx.shield();
+    } else if (sp.name === 'Cloak') {
+      // Ilwrath cloaking device
+      this.shieldTimer = sp.duration;
+      this.specialCooldown = sp.duration + 60;
+      sfx.warp();
+    } else if (sp.name === 'Limpet') {
+      // VUX limpet - slows enemy
+      const target = this.isPlayer ? enemyShip : playerShip;
+      target.vx *= 0.3; target.vy *= 0.3;
+      spawnParticles(target.x, target.y, '#44ff88', 8, 2);
+      this.specialCooldown = 90;
+      sfx.alarm();
+    } else if (sp.name === 'Furnace') {
+      // Druuge burns crew for energy
+      if (this.crew > 1) {
+        this.crew--;
+        this.energy = Math.min(this.def.maxEnergy, this.energy + 40);
+        spawnParticles(this.x, this.y, '#ff4400', 6, 2);
+        this.specialCooldown = 30;
+        sfx.hit();
+      }
+    } else if (sp.name === 'Siren') {
+      // Syreen siren song - steal crew from enemy
+      const target = this.isPlayer ? enemyShip : playerShip;
+      if (target.crew > 1) {
+        const stolen = Math.min(2, target.crew - 1);
+        target.crew -= stolen;
+        this.crew = Math.min(this.def.maxCrew, this.crew + stolen);
+        spawnParticles(target.x, target.y, '#ff88cc', 8, 2);
+        spawnParticles(this.x, this.y, '#88ccff', 6, 2);
+      }
+      this.specialCooldown = 120;
+      sfx.shield();
+    } else if (sp.name === 'Glory') {
+      // Shofixti glory device - massive self-destruct bomb
+      const target = this.isPlayer ? enemyShip : playerShip;
+      const d = dist(this.x, this.y, target.x, target.y);
+      if (d < 100) {
+        const dmg = Math.max(1, Math.floor(12 - d / 10));
+        target.takeDamage(dmg);
+      }
+      this.crew = 0; this.alive = false;
+      spawnParticles(this.x, this.y, '#ffff44', 30, 6);
+      spawnParticles(this.x, this.y, '#ff8844', 20, 5);
+      sfx.explode();
     }
   }
   takeDamage(dmg) {
@@ -1048,6 +1613,14 @@ function updateAI(ship, target) {
     else if (ship.def.special.name === 'Regenerate' && ship.crew < ship.def.maxCrew * 0.5) ship.useSpecial();
     else if (ship.def.special.name === 'Drone' && ship.drones.length < 3) ship.useSpecial();
     else if (ship.def.special.name === 'Confusion' && d < 150) ship.useSpecial();
+    else if (ship.def.special.name === 'Fireblade' && d < 120) ship.useSpecial();
+    else if (ship.def.special.name === 'Cloak' && ship.shieldTimer <= 0) ship.useSpecial();
+    else if (ship.def.special.name === 'Limpet' && d < 200) ship.useSpecial();
+    else if (ship.def.special.name === 'Absorb' && d < 150 && ship.shieldTimer <= 0) ship.useSpecial();
+    else if (ship.def.special.name === 'Furnace' && ship.energy < 30 && ship.crew > 3) ship.useSpecial();
+    else if (ship.def.special.name === 'Siren' && d < 150) ship.useSpecial();
+    else if (ship.def.special.name === 'Glory' && d < 60 && ship.crew <= 2) ship.useSpecial();
+    else if (ship.def.special.name === 'Reverse' && d < 60) ship.useSpecial();
     else if (d < 80) ship.useSpecial();
   }
 
@@ -1096,11 +1669,24 @@ function generateStarMap() {
     { race: 'pkunk',     cx: -600, cy:  100, label: 'Pkunk Space' },
     { race: 'melnorme',  cx:    0, cy: -600, label: 'Melnorme Space' },
     { race: 'orz',       cx: -200, cy: -700, label: 'Orz Space' },
+    { race: 'kohrah',    cx:  700, cy: -600, label: 'Kohr-Ah Space' },
+    { race: 'yehat',     cx: -800, cy: -200, label: 'Yehat Space' },
+    { race: 'supox',     cx:  400, cy:  700, label: 'Supox Space' },
+    { race: 'utwig',     cx:  800, cy:  100, label: 'Utwig Space' },
+    { race: 'thraddash', cx: -700, cy: -600, label: 'Thraddash Space' },
+    { race: 'ilwrath',   cx: -900, cy:  400, label: 'Ilwrath Space' },
+    { race: 'umgah',     cx:  300, cy: -800, label: 'Umgah Space' },
+    { race: 'vux',       cx:  900, cy: -200, label: 'VUX Space' },
+    { race: 'arilou',    cx: -300, cy:  700, label: 'Arilou Space' },
+    { race: 'druuge',    cx:  800, cy:  700, label: 'Druuge Space' },
+    { race: 'syreen',    cx: -600, cy:  600, label: 'Syreen Space' },
+    { race: 'shofixti',  cx: -100, cy:  900, label: 'Shofixti Space' },
   ];
 
   const constellations = [
     'Centauri','Draconis','Hyades','Lyncis','Cygni','Vulpeculae','Corvi','Serpentis',
     'Pavonis','Aquarii','Tucanae','Orionis','Gruis','Tauri','Crucis','Ophiuchi',
+    'Librae','Persei','Andromedae','Lyrae','Normae','Indi','Mensae','Fornacis',
   ];
   const greekNames = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta',
     'Iota','Kappa','Lambda','Mu','Nu','Xi','Omicron','Rho','Sigma','Tau','Upsilon','Phi','Chi','Psi','Omega','Vega'];
@@ -1161,18 +1747,19 @@ function generateStarMap() {
       starIdx++;
     }
   }
-  // Add 8 neutral/unowned stars scattered in between
-  for (let ni = 0; ni < 8; ni++) {
-    let x, y;
+  // Add 40 neutral/unowned stars scattered across the map
+  for (let ni = 0; ni < 40; ni++) {
+    let x, y, attempts = 0;
     do {
       x = (Math.random() - 0.5) * MAP_SIZE;
       y = (Math.random() - 0.5) * MAP_SIZE;
-    } while (starMap.some(s => dist(s.x, s.y, x, y) < 100));
+      attempts++;
+    } while (attempts < 50 && starMap.some(s => dist(s.x, s.y, x, y) < 60));
     const col = STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)];
-    const sName = `${greekNames[(starIdx + ni) % greekNames.length]} ${constellations[(8 + ni) % constellations.length]}`;
+    const sName = `${greekNames[(starIdx + ni) % greekNames.length]} ${constellations[(ni) % constellations.length]}`;
     starMap.push({
       x, y, name: sName, color: col, type: 'normal',
-      planets: makePlanets(greekNames[(starIdx + ni) % greekNames.length], 3 + Math.floor(Math.random() * 5)),
+      planets: makePlanets(greekNames[(starIdx + ni) % greekNames.length], 2 + Math.floor(Math.random() * 6)),
       alien: null, territory: null,
       artifact: false, visited: false,
     });
@@ -1267,6 +1854,138 @@ const DIALOGUES = {
       { text: 'What information do you have?', response: 'For 15 minerals, I can tell you this: the dimensional rift was caused by the Sa-Matra detonation. Three Precursor Seals can close it. The Orz do not want it closed. This information is NOW free. You are welcome!', action: 'trade', cost: 15 },
       { text: 'Can we buy fuel?', response: 'Of course! 10 minerals for 30 units of HyperSpace fuel! The Druuge charge MUCH more, and they want your crew! We are MUCH more ethical!', action: 'swtrade', cost: 10, give: 30 },
       { text: 'Tell us about the Orz.', response: 'The Orz are... projections. Fingers of a larger entity pushing through from another dimension. The Androsynth found this out the hard way. They are ALL gone now. Do not *pull* too hard.', action: 'info' },
+    ],
+  },
+  kohrah: {
+    portrait: { color: '#441111', eye: '#ff0000', skin: '#220808' },
+    greeting: 'You face the Ur-Quan Kohr-Ah. The Eternal Doctrine demands the cleansing of ALL non-Ur-Quan life. You will be... cleansed.',
+    friendly: 'The Kzer-Za were fools to enslave when they should have cleansed. But the rift... even we must pause our holy work.',
+    hostile: 'There is no negotiation. There is only the cleansing fire of the Marauder.',
+    choices: [
+      { text: 'The rift threatens you too, Kohr-Ah.', response: 'We... acknowledge this truth. The things from *below* cannot be cleansed by conventional means. Perhaps a temporary cessation of the Doctrine is... acceptable. Give us 25 minerals as tribute.', action: 'trade', cost: 25 },
+      { text: 'Your genocide ends here!', response: 'GENOCIDE? We call it MERCY. When we cleanse a species, we remember them forever in our songs. Now YOU shall be remembered!', action: 'fight' },
+      { text: 'What do you know of the Precursor Seals?', response: 'The Precursors... they knew of the spaces *between*. They built barriers. Our ancestors spoke of three Seals. One lies near Orz space. Another in the deep black. The third... we do not know.', action: 'info' },
+    ],
+  },
+  yehat: {
+    portrait: { color: '#aa4422', eye: '#ffcc00', skin: '#884422' },
+    greeting: 'Hrrraaak! A human vessel approaches! I am Braky Girdy One of the Yehat Starship Clans. Our people are divided by civil war, but our HONOR remains!',
+    friendly: 'You fought alongside us against the Ur-Quan! The Rebel Clans salute your courage, Captain!',
+    hostile: 'KRAAAWK! You insult the Yehat warrior code! Prepare for battle!',
+    choices: [
+      { text: 'How goes the civil war?', response: 'The Royalist Clans still support the cowardly Queen who surrendered to the Ur-Quan. But the Rebel Clans fight on! We would welcome your help. Take 20 fuel as a gift between warriors!', action: 'fuel' },
+      { text: 'Test my combat skills, Yehat!', response: 'HRAAAK! Now you speak the language of the Yehat! Let our Terminators clash! If you win, you earn the respect of ALL the Clans!', action: 'spar' },
+      { text: 'Have you heard of dimensional rifts?', response: 'Our scouts report strange... openings in space near the Orz territories. Things come through. Things that should not exist. The Pkunk babble about cosmic balance. For once, the feathered fools may be right.', action: 'info' },
+    ],
+  },
+  supox: {
+    portrait: { color: '#44aa22', eye: '#ffee44', skin: '#338811' },
+    greeting: 'Gentle greetings, travelers! We are the Supox Utricularia, children of the green and growing. Our roots extend in friendship to all peaceful species.',
+    friendly: 'Your aura nourishes us like sunlight! The Supox bloom in your presence, dear Captain.',
+    hostile: 'Even the gentlest flower has thorns. You force our hand, and our Blades are sharp.',
+    choices: [
+      { text: 'Your world is beautiful. Can we trade?', response: 'Of course! We have little need for minerals - we photosynthesize! Give us 10 minerals and we shall share 25 units of bio-fuel, refined from our own photosynthetic reserves!', action: 'swtrade', cost: 10, give: 25 },
+      { text: 'How are the Utwig doing?', response: 'Oh, our dear friends the Utwig! They are still SO sad about their broken Ultron. They wear their Masks of Ultimate Despair constantly now. If only someone could repair it... perhaps with Precursor technology?', action: 'info' },
+      { text: 'Can you heal our crew?', response: 'Yes! Our botanical medicines can mend almost any wound. Let our spores work their gentle magic. +10 crew restored to health!', action: 'heal' },
+    ],
+  },
+  utwig: {
+    portrait: { color: '#8844aa', eye: '#ffcc44', skin: '#552277' },
+    greeting: 'We are the Utwig. Once, we possessed the Ultron, the most magnificent device in all creation. Now it is broken. All is despair. ALL IS MEANINGLESS.',
+    friendly: 'You... you show kindness to the Utwig in our darkest hour? Perhaps... no. Nothing can lift this veil of sorrow.',
+    hostile: 'You dare compound our misery with THREATS? Very well. Our Jugger shall express our GRIEF through COMBAT.',
+    choices: [
+      { text: 'What was the Ultron?', response: 'The Ultron was EVERYTHING! It told us the meaning of existence! It validated our masks! And then... the Druuge TRICKED us and it BROKE! Now we wear only the Mask of Ultimate Sorrow. 20 minerals might ease our pain slightly.', action: 'trade', cost: 20 },
+      { text: 'Can we help fix the Ultron?', response: 'Fix it? You would... attempt such a thing? The Supox said Precursor technology might work. If you find the Seals, perhaps... perhaps there is hope. We shall let you pass in peace. Take 30 minerals from our reserves - we have no need for joy.', action: 'minerals' },
+      { text: 'Pull yourselves together!', response: 'PULL OURSELVES TOGETHER?! How DARE you minimize our existential ANGUISH! We shall demonstrate our sorrow through the medium of COMBAT!', action: 'fight' },
+    ],
+  },
+  thraddash: {
+    portrait: { color: '#cc6622', eye: '#ff4400', skin: '#884411' },
+    greeting: 'HRAH! Another weakling approaches Thraddash space! We are Culture Nineteen - the GREATEST of all Thraddash cultures! We destroyed Culture Eighteen last week!',
+    friendly: 'You are ALMOST as tough as a Thraddash! That is the highest compliment we know! HRAH!',
+    hostile: 'You dare enter Thraddash space?! Culture Nineteen shall add YOUR skull to our collection! HRAH HRAH HRAH!',
+    choices: [
+      { text: 'Tell me about your cultures.', response: 'Culture One invented fire! Culture Two used fire to destroy Culture One! Culture Three invented the WHEEL! Culture Four used wheels to run over Culture Three! We are Culture Nineteen and we are the BEST because we have AFTERBURNERS! HRAH!', action: 'info' },
+      { text: 'Want to trade, tough guys?', response: 'TRADE?! Thraddash do not TRADE! We TAKE! But... you look tough. Fine! 15 minerals for safe passage. Culture Eighteen would have charged MORE! HRAH!', action: 'trade', cost: 15 },
+      { text: 'Fight me, you blowhards!', response: 'HRAH!! NOW you speak the language of the Thraddash! Culture Nineteen accepts your challenge! PREPARE YOUR FACE FOR PUNCHING!', action: 'fight' },
+    ],
+  },
+  ilwrath: {
+    portrait: { color: '#662288', eye: '#ff0044', skin: '#331144' },
+    greeting: 'Yessss... another victim wanders into our web. We are the Ilwrath, devoted servants of Dogar and Kazon, the twin gods of darkness and destruction.',
+    friendly: 'Dogar and Kazon smile upon you... for now. But they are FICKLE gods, human.',
+    hostile: 'Dogar and Kazon DEMAND your suffering! We shall feast upon your fear!',
+    choices: [
+      { text: 'Are Dogar and Kazon real?', response: 'BLASPHEMY! Of course they are real! We hear their voices CONSTANTLY! They told us to burn the Pkunk! They told us to torment the weak! They... they also told us to let you pass for 20 minerals. The gods work in mysterious ways.', action: 'trade', cost: 20 },
+      { text: 'What lurks in the dimensional rift?', response: 'Yesss... we have sensed the rift. The things from *below*... even Dogar and Kazon are SILENT about them. This disturbs us greatly. Anything that frightens our gods must be truly TERRIBLE.', action: 'info' },
+      { text: 'Your spider gods are fake!', response: 'HERETIC!! Dogar and Kazon shall FEAST on your entrails! Our Avenger will show you the TRUE meaning of DARKNESS!', action: 'fight' },
+    ],
+  },
+  umgah: {
+    portrait: { color: '#dd8899', eye: '#111', skin: '#aa5566' },
+    greeting: 'Har har har! Look who stumbled into Umgah space! We are the Umgah! We are HILARIOUS! Want to hear a joke? We already implanted a monitoring device in your ship! JUST KIDDING! Or are we?!',
+    friendly: 'We LIKE you, human! You have a good sense of humor! Not as good as OURS, but whose is?! HAR HAR HAR!',
+    hostile: 'Oh no, you are being SERIOUS! That is the WORST thing! Umgah HATE seriousness! Time for a PRANK... with ANTIMATTER!',
+    choices: [
+      { text: 'You guys are... something else.', response: 'HAR HAR! We once convinced the Ilwrath their gods were talking to them! It was US on the HyperWave! They burned THREE planets before they figured it out! COMEDY GOLD! Here, take 30 fuel - you look like you need a laugh!', action: 'fuel' },
+      { text: 'Know anything useful about the rift?', response: 'The rift? Oh YES! We tried to prank the things from *below* but they did NOT laugh! NOT EVEN A CHUCKLE! Anything without a sense of humor is EXTREMELY DANGEROUS! The Precursor Seals can close it. Probably. Maybe. HAR HAR!', action: 'info' },
+      { text: 'Cut the comedy or else!', response: 'OR ELSE WHAT?! You will make us LAUGH HARDER?! HAR HAR HAR! Fine, if you want to be BORING, we can do BORING! Our Drone will bore you TO DEATH! Get it?! HAR HAR!', action: 'fight' },
+    ],
+  },
+  vux: {
+    portrait: { color: '#44aa66', eye: '#ff8800', skin: '#226633' },
+    greeting: 'Oh... oh my. A HUMAN. How... revolting. We are the VUX, and we must say, your species is the most physically REPULSIVE thing we have ever encountered. Those horrible SYMMETRICAL faces.',
+    friendly: 'We tolerate your presence, human, though your appearance makes our tentacles curl. You are... less ugly than MOST of your kind.',
+    hostile: 'Your face OFFENDS us! The Intruder shall remove this visual atrocity from our space!',
+    choices: [
+      { text: 'We come in peace despite the insults.', response: 'Peace? Oh very well. We suppose not ALL ugly creatures are dangerous. Captain Rand of your species was quite the diplomat, despite his HORRIFYING face. 20 minerals for passage through our aesthetically superior space.', action: 'trade', cost: 20 },
+      { text: 'Have you seen strange dimensional phenomena?', response: 'The things from the rift are even UGLIER than humans! We did not think that was possible! Our limpets have no effect on them. The Precursor Seals may help. Now please turn away, your face is giving us indigestion.', action: 'info' },
+      { text: 'You are not exactly beautiful yourself!', response: 'How DARE you! The VUX form is the PINNACLE of aesthetic perfection! Your tiny eyes and flat face are an ABOMINATION! Prepare for our Intruder to teach you some MANNERS!', action: 'fight' },
+    ],
+  },
+  arilou: {
+    portrait: { color: '#88bbff', eye: '#44ff88', skin: '#6699dd' },
+    greeting: 'We are here, as we have always been here, watching. We are the Arilou Lalee\'lay. We have protected your kind for longer than you know, dear human.',
+    friendly: 'Your species is precious to us. We have... adjusted things, from time to time, to ensure your survival. You need not know the details.',
+    hostile: 'We do not wish conflict. But we will defend ourselves. You cannot comprehend our true nature.',
+    choices: [
+      { text: 'Why do you protect humanity?', response: 'There are... things in the spaces between dimensions. The Orz are merely one such entity. Your species has a quality that draws their attention. We have been... pruning that quality. Shielding you. The rift makes our work harder.', action: 'info' },
+      { text: 'Can you help us close the rift?', response: 'We have been trying, in our way. The Precursor Seals are the key. We can sense their locations dimly. One is near Orz space, another near the Kohr-Ah, the third near the Mycon. Take this fuel for your journey. +30 fuel.', action: 'fuel' },
+      { text: 'Help us fight!', response: 'Fighting is... crude. But the Skiff is swift, and our aim is true. We shall demonstrate, if you insist. Know that we harbor no ill will.', action: 'spar' },
+    ],
+  },
+  druuge: {
+    portrait: { color: '#aa6622', eye: '#ff4400', skin: '#664411' },
+    greeting: 'Welcome, welcome to the Crimson Corporation trading post! I am Trade Director Keel of the Druuge. Everything has a price, and we accept ALL forms of payment. Including CREW MEMBERS.',
+    friendly: 'A profitable customer! The Crimson Corporation values your business. Your credit rating is... adequate.',
+    hostile: 'Attacking Druuge property carries a penalty of INFINITE debt! Our Mauler cannons enforce the fine!',
+    choices: [
+      { text: 'What do you have for sale?', response: 'We have fuel! SO much fuel! 10 minerals for 30 units! The Melnorme charge similar rates but they do not offer our EXCITING work-release crew program! Just sign here... in blood... HAH just kidding! Minerals only!', action: 'swtrade', cost: 10, give: 30 },
+      { text: 'Tell me about the Ultron.', response: 'The Ultron? Oh yes, we SOLD that to the Utwig! For a VERY fair price! Then we may have accidentally caused it to break. The Utwig were SO upset! But a deal is a deal! No refunds! Company policy!', action: 'info' },
+      { text: 'Your business practices are criminal!', response: 'CRIMINAL?! The Crimson Corporation operates within ALL applicable laws! Laws which we WROTE! Your slander incurs a debt of 500 minerals! Failure to pay results in Mauler cannon arbitration!', action: 'fight' },
+    ],
+  },
+  syreen: {
+    portrait: { color: '#4488cc', eye: '#88ddff', skin: '#225588' },
+    greeting: 'Welcome, Captain. I am Commander Talana of the Syreen. Our world was destroyed by the Mycon, but our spirit endures. We remember your alliance fondly.',
+    friendly: 'The Syreen have not forgotten your aid against the Ur-Quan. Our song is one of gratitude and... perhaps something more.',
+    hostile: 'Do not mistake our grace for weakness. The Penetrator is a formidable vessel, and our Siren Song will leave you crewless.',
+    choices: [
+      { text: 'How are your people recovering?', response: 'We found a new homeworld, thanks to your alliance. The wound of Syra\'s destruction still aches, but we heal. The Mycon will answer for their crimes someday. Take these minerals - we have been mining well. +30 minerals.', action: 'minerals' },
+      { text: 'Will you help us close the rift?', response: 'The Syreen stand with the Alliance, Captain. We have heard of the Precursor Seals. Our scouts report Arilou activity near the rift. They may know more. Take crew volunteers for your mission. +10 crew!', action: 'heal' },
+      { text: 'Spar with us for practice!', response: 'A friendly contest? The Syreen enjoy a good challenge. But be warned, Captain - our Siren Song has turned many a battle. Try not to be too... distracted.', action: 'spar' },
+    ],
+  },
+  shofixti: {
+    portrait: { color: '#aa8844', eye: '#ff6600', skin: '#665522' },
+    greeting: 'KYAIII! I am Tanaka of the Shofixti! Or... maybe I am the last. We detonated our sun to stop the Ur-Quan! It was GLORIOUS! The Yehat cry when they speak of our sacrifice!',
+    friendly: 'You are friend of Shofixti! Friend of HONOR! We small but we FIERCE! Like the marsupial of legend!',
+    hostile: 'You insult Shofixti honor?! Then you face the GLORY DEVICE! We die with HONOR and take you WITH US!',
+    choices: [
+      { text: 'Your sacrifice was legendary!', response: 'KYAII! Yes! When the Ur-Quan Dreadnought came, we flew into our own SUN and made it go BOOM! Most honorable death! But somehow I survived! Now I seek more GLORY! Take 20 fuel for your quest, honorable Captain!', action: 'fuel' },
+      { text: 'Can you join our crew?', response: 'JOIN?! Shofixti Scout is TINY but FAST! We cannot fit on your big ship, but we give you crew volunteers! Five brave Shofixti warriors! They know the Glory Device technique! +5 crew!', action: 'heal' },
+      { text: 'Show me your fighting spirit!', response: 'KYAIIII!! You want to see Shofixti POWER?! Our Scout is small but our HEART is HUGE! Warning: if things look bad, I WILL use the Glory Device! Death before dishonor! KYAII!', action: 'spar' },
     ],
   },
 };
@@ -1382,73 +2101,101 @@ function drawAlienPortrait(race, x, y) {
   ctx.fillStyle = '#0a0a18'; ctx.fillRect(x, y, W2, H2);
 
   if (race === 'urquan') {
-    // Ur-Quan Kzer-Za - green caterpillar-like, many eyes, talking pet on shoulder
-    ctx.fillStyle = '#113311'; ctx.fillRect(x + 6, y + 10, 52, 48);
-    ctx.fillStyle = '#225522'; ctx.fillRect(x + 10, y + 14, 44, 40);
-    ctx.fillStyle = '#338833'; ctx.fillRect(x + 14, y + 18, 36, 32);
-    // Segmented body ridges
-    ctx.fillStyle = '#225522';
-    for (let i = 0; i < 4; i++) ctx.fillRect(x + 14, y + 20 + i * 8, 36, 2);
-    // Many small eyes in a row
-    ctx.fillStyle = '#ffff00';
-    for (let i = 0; i < 5; i++) {
-      ctx.beginPath(); ctx.arc(x + 18 + i * 7, y + 26, 3, 0, TAU); ctx.fill();
+    // Ur-Quan Kzer-Za - large green caterpillar, segmented body fills frame
+    ctx.fillStyle = '#0a1a0a'; ctx.fillRect(x, y, W2, H2);
+    // Body segments - thick caterpillar filling the portrait
+    const segs = 6;
+    for (let i = 0; i < segs; i++) {
+      const sy = y + 16 + i * 7;
+      const shade = i < 3 ? '#2a6622' : '#1a4412';
+      ctx.fillStyle = shade;
+      ctx.fillRect(x + 8 + i * 1, sy, 48 - i * 2, 7);
+      // Ridge highlight
+      ctx.fillStyle = '#3a8832';
+      ctx.fillRect(x + 10 + i * 1, sy, 44 - i * 2, 2);
+      // Ridge shadow
+      ctx.fillStyle = '#0a2a08';
+      ctx.fillRect(x + 10 + i * 1, sy + 5, 44 - i * 2, 1);
     }
-    ctx.fillStyle = '#884400';
-    for (let i = 0; i < 5; i++) {
-      ctx.beginPath(); ctx.arc(x + 18 + i * 7, y + 26, 1.5, 0, TAU); ctx.fill();
+    // Row of small amber eyes across top segment
+    ctx.fillStyle = '#ffcc00';
+    for (let i = 0; i < 6; i++) {
+      const ex = x + 14 + i * 6;
+      ctx.fillRect(ex, y + 20, 3, 3);
+      ctx.fillStyle = '#aa6600'; ctx.fillRect(ex + 1, y + 21, 1, 1);
+      ctx.fillStyle = '#ffcc00';
     }
-    // Mandibles
-    ctx.fillStyle = '#446644';
-    ctx.beginPath(); ctx.moveTo(x + 20, y + 40); ctx.lineTo(x + 12, y + 54); ctx.lineTo(x + 26, y + 46); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x + 44, y + 40); ctx.lineTo(x + 52, y + 54); ctx.lineTo(x + 38, y + 46); ctx.fill();
-    // Talking pet (small creature on side)
-    ctx.fillStyle = '#cc8866'; ctx.beginPath(); ctx.arc(x + 52, y + 14, 6, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.arc(x + 52, y + 13, 2, 0, TAU); ctx.fill();
+    // Mandible pincers curving down
+    ctx.fillStyle = '#2a5518';
+    ctx.beginPath(); ctx.moveTo(x + 16, y + 48); ctx.lineTo(x + 6, y + 60); ctx.lineTo(x + 10, y + 56); ctx.lineTo(x + 20, y + 50); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 48, y + 48); ctx.lineTo(x + 58, y + 60); ctx.lineTo(x + 54, y + 56); ctx.lineTo(x + 44, y + 50); ctx.fill();
+    // Talking Pet - small brown creature at top right
+    ctx.fillStyle = '#bb8855'; ctx.beginPath(); ctx.arc(x + 54, y + 10, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ddaa77'; ctx.beginPath(); ctx.arc(x + 54, y + 9, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff3333'; ctx.beginPath(); ctx.arc(x + 53, y + 8, 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.fillRect(x + 52, y + 8, 1, 1);
   } else if (race === 'spathi') {
-    // Spathi - cowardly mollusk, one big eye on stalk, shell
-    ctx.fillStyle = '#885533'; ctx.fillRect(x + 8, y + 24, 48, 34);
-    ctx.fillStyle = '#aa7744'; ctx.fillRect(x + 12, y + 28, 40, 26);
-    // Shell spiral lines
-    ctx.strokeStyle = '#886633'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(x + 32, y + 40, 12, 0, TAU); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x + 32, y + 40, 8, 0, TAU); ctx.stroke();
-    // Eye stalk
-    ctx.fillStyle = '#cc9966'; ctx.fillRect(x + 29, y + 6, 6, 22);
-    // Big scared eye
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 9, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#44aa44'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 5, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 2.5, 0, TAU); ctx.fill();
-    // Tiny scared pupil
-    ctx.fillStyle = '#fff'; ctx.fillRect(x + 30, y + 8, 2, 2);
-    // Tentacles peeking out scared
+    // Spathi - cowardly mollusk hiding in shell, one terrified eye on stalk
+    ctx.fillStyle = '#0a0806'; ctx.fillRect(x, y, W2, H2);
+    // Large clamshell taking up bottom 2/3
+    ctx.fillStyle = '#8b6b3a';
+    ctx.beginPath(); ctx.arc(x + 32, y + 48, 26, Math.PI, TAU); ctx.fill();
+    ctx.fillStyle = '#a08050';
+    ctx.beginPath(); ctx.arc(x + 32, y + 48, 22, Math.PI, TAU); ctx.fill();
+    // Shell ridges (concentric arcs)
+    ctx.strokeStyle = '#6b5030'; ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath(); ctx.arc(x + 32, y + 48, 8 + i * 5, Math.PI + 0.3, TAU - 0.3); ctx.stroke();
+    }
+    // Shell hinge marks
+    ctx.fillStyle = '#7a6040'; ctx.fillRect(x + 28, y + 44, 8, 2);
+    // Eye stalk - thin, wavering slightly
+    const stalksway = Math.sin(frame * 0.04) * 2;
     ctx.fillStyle = '#cc9966';
-    ctx.fillRect(x + 10, y + 44, 8, 3);
-    ctx.fillRect(x + 46, y + 44, 8, 3);
+    ctx.fillRect(x + 30 + stalksway, y + 4, 4, 24);
+    ctx.fillStyle = '#ddaa77';
+    ctx.fillRect(x + 31 + stalksway, y + 5, 2, 22);
+    // Big terrified eye at top of stalk
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 32 + stalksway, y + 8, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#44cc44'; ctx.beginPath(); ctx.arc(x + 32 + stalksway, y + 8, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 33 + stalksway, y + 9, 2.5, 0, TAU); ctx.fill();
+    // Scared highlight
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 29 + stalksway, y + 5, 2, 2);
+    // Small tentacles peeking from shell gap
+    ctx.fillStyle = '#ddaa77';
+    ctx.fillRect(x + 12, y + 44, 6, 2);
+    ctx.fillRect(x + 46, y + 44, 6, 2);
+    ctx.fillRect(x + 20, y + 46, 4, 2);
   } else if (race === 'chmmr') {
-    // Chmmr - crystal/metal hybrid, geometric, glowing
+    // Chmmr - Chenjesu crystal fused with Mmrnmhrm metal, pulsing energy
     const glow = Math.sin(frame * 0.06) * 0.3 + 0.7;
-    ctx.fillStyle = '#334466'; ctx.fillRect(x + 8, y + 8, 48, 48);
-    // Crystal body - diamond shape
-    ctx.fillStyle = '#4466aa';
-    ctx.beginPath(); ctx.moveTo(x + 32, y + 6); ctx.lineTo(x + 52, y + 32); ctx.lineTo(x + 32, y + 58); ctx.lineTo(x + 12, y + 32); ctx.fill();
-    ctx.fillStyle = '#6688cc';
-    ctx.beginPath(); ctx.moveTo(x + 32, y + 10); ctx.lineTo(x + 48, y + 32); ctx.lineTo(x + 32, y + 54); ctx.lineTo(x + 16, y + 32); ctx.fill();
-    // Crystal facets
-    ctx.fillStyle = '#88aadd';
-    ctx.beginPath(); ctx.moveTo(x + 32, y + 14); ctx.lineTo(x + 44, y + 32); ctx.lineTo(x + 32, y + 32); ctx.fill();
-    // Glowing sensor eyes
-    ctx.fillStyle = `rgba(170,200,255,${glow})`; ctx.beginPath(); ctx.arc(x + 26, y + 28, 4, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 38, y + 28, 4, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#ddeeff'; ctx.beginPath(); ctx.arc(x + 26, y + 28, 2, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 38, y + 28, 2, 0, TAU); ctx.fill();
-    // Metal components (Mmrnmhrm fusion)
-    ctx.fillStyle = '#556677';
-    ctx.fillRect(x + 22, y + 38, 20, 4);
-    ctx.fillRect(x + 28, y + 34, 8, 12);
-    // Internal glow
-    ctx.globalAlpha = glow * 0.4;
-    ctx.fillStyle = '#aaccff'; ctx.beginPath(); ctx.arc(x + 32, y + 32, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(x, y, W2, H2);
+    // Crystal body - large multifaceted diamond
+    ctx.fillStyle = '#2a3a6a';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 4); ctx.lineTo(x + 54, y + 30); ctx.lineTo(x + 46, y + 58); ctx.lineTo(x + 18, y + 58); ctx.lineTo(x + 10, y + 30); ctx.fill();
+    // Crystal facet - left face
+    ctx.fillStyle = '#3a5a8a';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 6); ctx.lineTo(x + 12, y + 30); ctx.lineTo(x + 20, y + 56); ctx.lineTo(x + 32, y + 40); ctx.fill();
+    // Crystal facet - right face (brighter)
+    ctx.fillStyle = '#5a7aaa';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 6); ctx.lineTo(x + 52, y + 30); ctx.lineTo(x + 44, y + 56); ctx.lineTo(x + 32, y + 40); ctx.fill();
+    // Crystal highlight edge
+    ctx.fillStyle = '#8aacdd';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 6); ctx.lineTo(x + 34, y + 8); ctx.lineTo(x + 34, y + 38); ctx.lineTo(x + 32, y + 40); ctx.fill();
+    // Metal bands (Mmrnmhrm components)
+    ctx.fillStyle = '#556677'; ctx.fillRect(x + 16, y + 24, 32, 3);
+    ctx.fillStyle = '#667788'; ctx.fillRect(x + 18, y + 24, 28, 1);
+    ctx.fillStyle = '#556677'; ctx.fillRect(x + 20, y + 44, 24, 3);
+    // Glowing sensor nodes
+    ctx.fillStyle = `rgba(170,220,255,${glow})`; ctx.beginPath(); ctx.arc(x + 24, y + 26, 4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 26, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#eef'; ctx.beginPath(); ctx.arc(x + 24, y + 26, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 26, 2, 0, TAU); ctx.fill();
+    // Central energy core
+    ctx.globalAlpha = glow * 0.5;
+    ctx.fillStyle = '#aaccff'; ctx.beginPath(); ctx.arc(x + 32, y + 34, 5, 0, TAU); ctx.fill();
+    ctx.globalAlpha = glow * 0.3;
+    ctx.fillStyle = '#ccddff'; ctx.beginPath(); ctx.arc(x + 32, y + 34, 8, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
   } else if (race === 'zoqfotpik') {
     // Zoq-Fot-Pik - three tiny aliens together, one green, one blue, one brown
@@ -1477,62 +2224,77 @@ function drawAlienPortrait(race, x, y) {
     ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 50, y + 31, 2, 0, TAU); ctx.fill();
     ctx.fillStyle = '#886644'; ctx.fillRect(x + 48, y + 43, 4, 11);
   } else if (race === 'orz') {
-    // Orz - fish-like interdimensional being, translucent, cheerful but creepy
-    ctx.fillStyle = '#082828'; ctx.fillRect(x, y, W2, H2);
-    // Shimmering dimensional background
-    const t = frame * 0.03;
-    for (let i = 0; i < 6; i++) {
-      ctx.globalAlpha = 0.15 + Math.sin(t + i) * 0.1;
-      ctx.fillStyle = i % 2 ? '#22aa88' : '#115544';
-      const bx = x + 32 + Math.cos(t + i * 1.2) * 20;
-      const by = y + 32 + Math.sin(t + i * 0.9) * 18;
-      ctx.beginPath(); ctx.arc(bx, by, 10, 0, TAU); ctx.fill();
+    // Orz - fish/marine alien from *below*, translucent, eerily cheerful
+    ctx.fillStyle = '#041818'; ctx.fillRect(x, y, W2, H2);
+    // Dimensional shimmer background
+    const t = frame * 0.025;
+    for (let i = 0; i < 8; i++) {
+      ctx.globalAlpha = 0.08 + Math.sin(t + i * 0.8) * 0.06;
+      ctx.fillStyle = i % 3 === 0 ? '#22aa88' : i % 3 === 1 ? '#115544' : '#0a3322';
+      const bx = x + 32 + Math.cos(t + i * 1.1) * 24;
+      const by = y + 32 + Math.sin(t + i * 0.7) * 20;
+      ctx.fillRect(bx - 6, by - 1, 12, 2);
     }
     ctx.globalAlpha = 1;
-    // Fish/amphibian body
-    ctx.fillStyle = '#118866';
-    ctx.beginPath(); ctx.moveTo(x + 16, y + 28); ctx.lineTo(x + 48, y + 24); ctx.lineTo(x + 50, y + 36); ctx.lineTo(x + 16, y + 40); ctx.fill();
-    ctx.fillStyle = '#22aa88';
-    ctx.beginPath(); ctx.moveTo(x + 18, y + 30); ctx.lineTo(x + 46, y + 26); ctx.lineTo(x + 48, y + 34); ctx.lineTo(x + 18, y + 38); ctx.fill();
-    // Big happy eyes
-    ctx.fillStyle = '#55eebb'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 6, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 42, y + 26, 6, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#ff00ff'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 3, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 42, y + 26, 3, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 1.5, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 42, y + 26, 1.5, 0, TAU); ctx.fill();
-    // Smiling mouth (creepy)
-    ctx.fillStyle = '#33ddaa';
-    ctx.beginPath(); ctx.arc(x + 34, y + 38, 6, 0, Math.PI); ctx.fill();
-    ctx.fillStyle = '#082828'; ctx.fillRect(x + 28, y + 37, 12, 2);
-    // Fins
+    // Fish body - wide oval shape
+    ctx.fillStyle = '#0a6644';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 32, 22, 14, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#11885a';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 31, 19, 11, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#22aa77';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 30, 15, 8, 0, 0, TAU); ctx.fill();
+    // Fin crest on top
+    ctx.fillStyle = '#11aa66';
+    ctx.beginPath(); ctx.moveTo(x + 24, y + 22); ctx.lineTo(x + 28, y + 12); ctx.lineTo(x + 32, y + 20); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 20); ctx.lineTo(x + 36, y + 10); ctx.lineTo(x + 40, y + 22); ctx.fill();
+    // Big round happy eyes
+    ctx.fillStyle = '#66ffcc'; ctx.beginPath(); ctx.arc(x + 24, y + 28, 6, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 28, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff44ff'; ctx.beginPath(); ctx.arc(x + 24, y + 28, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 28, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 24, y + 28, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 28, 1.5, 0, TAU); ctx.fill();
+    // Wide happy grin (unnervingly cheerful)
     ctx.fillStyle = '#22cc99';
-    ctx.beginPath(); ctx.moveTo(x + 14, y + 30); ctx.lineTo(x + 6, y + 18); ctx.lineTo(x + 18, y + 26); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x + 14, y + 38); ctx.lineTo(x + 4, y + 50); ctx.lineTo(x + 18, y + 42); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 32, y + 38, 8, 0.1, Math.PI - 0.1); ctx.fill();
+    ctx.fillStyle = '#041818'; ctx.fillRect(x + 25, y + 37, 14, 2);
+    ctx.fillStyle = '#aaffee'; // teeth
+    for (let i = 0; i < 5; i++) ctx.fillRect(x + 26 + i * 3, y + 39, 2, 2);
+    // Side fins
+    ctx.fillStyle = '#11aa77';
+    ctx.beginPath(); ctx.moveTo(x + 10, y + 30); ctx.lineTo(x + 2, y + 20); ctx.lineTo(x + 14, y + 26); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 54, y + 30); ctx.lineTo(x + 62, y + 20); ctx.lineTo(x + 50, y + 26); ctx.fill();
   } else if (race === 'mycon') {
-    // Mycon - fungal horror, single eye, pulsating, spore tendrils
-    ctx.fillStyle = '#220011'; ctx.fillRect(x, y, W2, H2);
-    ctx.fillStyle = '#661144';
-    ctx.beginPath(); ctx.arc(x + 32, y + 34, 22, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#882255';
-    ctx.beginPath(); ctx.arc(x + 32, y + 32, 18, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#aa3366';
-    ctx.beginPath(); ctx.arc(x + 32, y + 30, 14, 0, TAU); ctx.fill();
-    // Fungal ridges
-    ctx.fillStyle = '#993355';
-    for (let i = 0; i < 6; i++) {
-      const a = i * TAU / 6 + frame * 0.01;
-      ctx.fillRect(x + 32 + Math.cos(a) * 10 - 2, y + 32 + Math.sin(a) * 10 - 1, 4, 2);
+    // Mycon - deep red fungal mass, single fiery eye, dripping tendrils
+    ctx.fillStyle = '#1a0008'; ctx.fillRect(x, y, W2, H2);
+    // Fungal mass body - irregular blobby shape
+    const pulse = Math.sin(frame * 0.04) * 2;
+    ctx.fillStyle = '#4a1122';
+    ctx.beginPath(); ctx.arc(x + 32, y + 34 + pulse, 24, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6a1838';
+    ctx.beginPath(); ctx.arc(x + 30, y + 32 + pulse, 20, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#8a2248';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30 + pulse, 16, 0, TAU); ctx.fill();
+    // Fungal ridges and bumps
+    ctx.fillStyle = '#5a1830';
+    for (let i = 0; i < 8; i++) {
+      const a = i * TAU / 8 + frame * 0.008;
+      const r = 12 + Math.sin(a * 3) * 3;
+      ctx.beginPath(); ctx.arc(x + 32 + Math.cos(a) * r, y + 32 + Math.sin(a) * r + pulse, 3, 0, TAU); ctx.fill();
     }
-    // Single glowing eye
-    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 8, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#ff6600'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 5, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 2.5, 0, TAU); ctx.fill();
-    // Spore tendrils hanging down
-    ctx.fillStyle = '#882255';
-    for (let i = 0; i < 4; i++) {
-      const sx = x + 18 + i * 10;
-      ctx.fillRect(sx, y + 48, 3, 8 + Math.sin(frame * 0.05 + i) * 3);
+    // Single huge glowing eye - the Mycon's defining feature
+    ctx.fillStyle = '#ffdd00'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff8800'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff2200'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffff88'; ctx.fillRect(x + 30, y + 24, 2, 2); // highlight
+    // Dripping spore tendrils
+    ctx.fillStyle = '#6a1838';
+    for (let i = 0; i < 5; i++) {
+      const sx = x + 14 + i * 9;
+      const len = 10 + Math.sin(frame * 0.04 + i * 1.5) * 4;
+      ctx.fillRect(sx, y + 50, 3, len);
+      ctx.fillStyle = '#8a2248'; ctx.beginPath(); ctx.arc(sx + 1, y + 50 + len, 2, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#6a1838';
     }
   } else if (race === 'pkunk') {
     // Pkunk - mystical bird, colorful feathers, serene expression
@@ -1562,27 +2324,439 @@ function drawAlienPortrait(race, x, y) {
     ctx.beginPath(); ctx.moveTo(x + 16, y + 34); ctx.lineTo(x + 4, y + 42); ctx.lineTo(x + 16, y + 44); ctx.fill();
     ctx.beginPath(); ctx.moveTo(x + 48, y + 34); ctx.lineTo(x + 60, y + 42); ctx.lineTo(x + 48, y + 44); ctx.fill();
   } else if (race === 'melnorme') {
-    // Melnorme - round orange trader, one big eye, friendly grin
-    ctx.fillStyle = '#221100'; ctx.fillRect(x, y, W2, H2);
-    // Big round body
-    ctx.fillStyle = '#886611';
-    ctx.beginPath(); ctx.arc(x + 32, y + 36, 20, 0, TAU); ctx.fill();
+    // Melnorme - rotund orange/gold trader, single large eye, warm grin
+    ctx.fillStyle = '#1a0c00'; ctx.fillRect(x, y, W2, H2);
+    // Big round orange body filling most of frame
+    ctx.fillStyle = '#775500';
+    ctx.beginPath(); ctx.arc(x + 32, y + 36, 24, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa7711';
+    ctx.beginPath(); ctx.arc(x + 32, y + 34, 20, 0, TAU); ctx.fill();
     ctx.fillStyle = '#cc9922';
-    ctx.beginPath(); ctx.arc(x + 32, y + 34, 17, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 16, 0, TAU); ctx.fill();
     ctx.fillStyle = '#ddaa33';
-    ctx.beginPath(); ctx.arc(x + 32, y + 32, 14, 0, TAU); ctx.fill();
-    // Single big eye
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 8, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 5, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 3, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.fillRect(x + 30, y + 24, 2, 2);
-    // Merchant grin
-    ctx.fillStyle = '#885511';
-    ctx.beginPath(); ctx.arc(x + 32, y + 40, 8, 0.1, Math.PI - 0.1); ctx.fill();
-    ctx.fillStyle = '#ffeecc'; ctx.fillRect(x + 26, y + 40, 12, 2);
-    // Trade hat/cap
-    ctx.fillStyle = '#664400'; ctx.fillRect(x + 18, y + 16, 28, 6);
-    ctx.fillStyle = '#885511'; ctx.fillRect(x + 22, y + 12, 20, 6);
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 12, 0, TAU); ctx.fill();
+    // Single large eye (Melnorme defining feature)
+    ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(x + 32, y + 24, 9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 32, y + 23, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(x + 32, y + 24, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ddaa00'; ctx.beginPath(); ctx.arc(x + 32, y + 24, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 32, y + 24, 1.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 29, y + 21, 2, 2); // highlight
+    // Warm merchant grin (wide)
+    ctx.fillStyle = '#774400';
+    ctx.beginPath(); ctx.arc(x + 32, y + 40, 10, 0.1, Math.PI - 0.1); ctx.fill();
+    ctx.fillStyle = '#ffeecc';
+    for (let i = 0; i < 6; i++) ctx.fillRect(x + 24 + i * 3, y + 40, 2, 1);
+    // Wrinkly laugh lines around eye
+    ctx.fillStyle = '#bb8818';
+    ctx.beginPath(); ctx.arc(x + 32, y + 24, 10, -0.4, 0.4); ctx.stroke();
+    // Fleshy ridges on top
+    ctx.fillStyle = '#bb8818';
+    ctx.fillRect(x + 22, y + 14, 20, 3);
+    ctx.fillStyle = '#cc9922';
+    ctx.fillRect(x + 24, y + 12, 16, 3);
+  } else if (race === 'kohrah') {
+    // Kohr-Ah - black caterpillar (dark Ur-Quan), segmented, menacing red glow
+    ctx.fillStyle = '#080000'; ctx.fillRect(x, y, W2, H2);
+    // Body segments - dark version of Ur-Quan
+    const segs = 6;
+    for (let i = 0; i < segs; i++) {
+      const sy = y + 16 + i * 7;
+      const shade = i < 3 ? '#1a0808' : '#100404';
+      ctx.fillStyle = shade;
+      ctx.fillRect(x + 8 + i * 1, sy, 48 - i * 2, 7);
+      ctx.fillStyle = '#2a0c0c';
+      ctx.fillRect(x + 10 + i * 1, sy, 44 - i * 2, 2);
+      ctx.fillStyle = '#060000';
+      ctx.fillRect(x + 10 + i * 1, sy + 5, 44 - i * 2, 1);
+    }
+    // Row of dim red eyes
+    ctx.fillStyle = '#aa0000';
+    for (let i = 0; i < 6; i++) {
+      const ex = x + 14 + i * 6;
+      ctx.fillRect(ex, y + 20, 3, 3);
+      ctx.fillStyle = '#ff2200'; ctx.fillRect(ex + 1, y + 21, 1, 1);
+      ctx.fillStyle = '#aa0000';
+    }
+    // Red glow emanating from center
+    ctx.globalAlpha = 0.3 + Math.sin(frame * 0.04) * 0.15;
+    ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(x + 32, y + 30, 10, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Blade-like mandibles (sharper, more menacing than Kzer-Za)
+    ctx.fillStyle = '#2a0808';
+    ctx.beginPath(); ctx.moveTo(x + 16, y + 48); ctx.lineTo(x + 2, y + 62); ctx.lineTo(x + 8, y + 56); ctx.lineTo(x + 20, y + 50); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 48, y + 48); ctx.lineTo(x + 62, y + 62); ctx.lineTo(x + 56, y + 56); ctx.lineTo(x + 44, y + 50); ctx.fill();
+    // Blade edges
+    ctx.fillStyle = '#440808';
+    ctx.beginPath(); ctx.moveTo(x + 16, y + 48); ctx.lineTo(x + 2, y + 62); ctx.lineTo(x + 4, y + 60); ctx.lineTo(x + 18, y + 48); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 48, y + 48); ctx.lineTo(x + 62, y + 62); ctx.lineTo(x + 60, y + 60); ctx.lineTo(x + 46, y + 48); ctx.fill();
+  } else if (race === 'yehat') {
+    // Yehat - pterodactyl/raptor warrior, shield crest, sharp beak, fierce
+    ctx.fillStyle = '#0a0600'; ctx.fillRect(x, y, W2, H2);
+    // Head crest/shield (bony, red-brown)
+    ctx.fillStyle = '#992211';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 2); ctx.lineTo(x + 12, y + 20); ctx.lineTo(x + 52, y + 20); ctx.fill();
+    ctx.fillStyle = '#bb3322';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 5); ctx.lineTo(x + 16, y + 20); ctx.lineTo(x + 48, y + 20); ctx.fill();
+    // Crest ridges
+    ctx.fillStyle = '#cc4433';
+    ctx.fillRect(x + 30, y + 6, 4, 14);
+    // Leathery pterodactyl head
+    ctx.fillStyle = '#664422';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 14, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#886633';
+    ctx.beginPath(); ctx.arc(x + 32, y + 28, 11, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa7744';
+    ctx.beginPath(); ctx.arc(x + 32, y + 27, 8, 0, TAU); ctx.fill();
+    // Fierce yellow raptor eyes
+    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(x + 24, y + 26, 4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 26, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 24, y + 26, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 26, 2, 0, TAU); ctx.fill();
+    // Angry brow
+    ctx.fillStyle = '#664422'; ctx.fillRect(x + 20, y + 22, 8, 2); ctx.fillRect(x + 36, y + 22, 8, 2);
+    // Sharp hooked beak
+    ctx.fillStyle = '#554411';
+    ctx.beginPath(); ctx.moveTo(x + 26, y + 34); ctx.lineTo(x + 32, y + 50); ctx.lineTo(x + 38, y + 34); ctx.fill();
+    ctx.fillStyle = '#443308';
+    ctx.fillRect(x + 28, y + 38, 8, 1); // beak seam
+    // Hook at beak tip
+    ctx.fillStyle = '#443308';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 50); ctx.lineTo(x + 30, y + 48); ctx.lineTo(x + 34, y + 48); ctx.fill();
+  } else if (race === 'supox') {
+    // Supox - plant alien, flower head, green
+    ctx.fillStyle = '#001100'; ctx.fillRect(x, y, W2, H2);
+    // Stem body
+    ctx.fillStyle = '#226611'; ctx.fillRect(x + 28, y + 36, 8, 22);
+    // Leaves
+    ctx.fillStyle = '#44aa22';
+    ctx.beginPath(); ctx.moveTo(x + 28, y + 42); ctx.lineTo(x + 12, y + 50); ctx.lineTo(x + 28, y + 48); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 36, y + 44); ctx.lineTo(x + 52, y + 52); ctx.lineTo(x + 36, y + 50); ctx.fill();
+    // Flower head
+    ctx.fillStyle = '#66cc44';
+    ctx.beginPath(); ctx.arc(x + 32, y + 28, 14, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#88ee66';
+    ctx.beginPath(); ctx.arc(x + 32, y + 26, 10, 0, TAU); ctx.fill();
+    // Petals
+    ctx.fillStyle = '#ffee44';
+    for (let i = 0; i < 6; i++) {
+      const pa = i * TAU / 6;
+      ctx.beginPath(); ctx.arc(x + 32 + Math.cos(pa) * 12, y + 26 + Math.sin(pa) * 12, 4, 0, TAU); ctx.fill();
+    }
+    // Face
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 28, y + 24, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 36, y + 24, 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#44aa22';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 3, 0.1, Math.PI - 0.1); ctx.fill();
+  } else if (race === 'utwig') {
+    // Utwig - masked alien, ornate mask, purple robes
+    ctx.fillStyle = '#110022'; ctx.fillRect(x, y, W2, H2);
+    // Robed body
+    ctx.fillStyle = '#552277'; ctx.fillRect(x + 16, y + 36, 32, 24);
+    ctx.fillStyle = '#663388'; ctx.fillRect(x + 18, y + 38, 28, 20);
+    // Mask (ornate golden)
+    ctx.fillStyle = '#aa7711'; ctx.fillRect(x + 18, y + 10, 28, 28);
+    ctx.fillStyle = '#ddaa22'; ctx.fillRect(x + 20, y + 12, 24, 24);
+    ctx.fillStyle = '#ffcc44'; ctx.fillRect(x + 22, y + 14, 20, 20);
+    // Mask eye slits (dark, sad)
+    ctx.fillStyle = '#220066';
+    ctx.fillRect(x + 24, y + 20, 5, 4);
+    ctx.fillRect(x + 35, y + 20, 5, 4);
+    // Mask mouth (downturned - sad)
+    ctx.fillStyle = '#442200';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 5, 0.3, Math.PI - 0.3); ctx.fill();
+    ctx.fillStyle = '#ffcc44'; ctx.fillRect(x + 28, y + 30, 8, 3);
+    // Mask crown ornament
+    ctx.fillStyle = '#ffdd44';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 6); ctx.lineTo(x + 28, y + 12); ctx.lineTo(x + 36, y + 12); ctx.fill();
+    ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 2, 0, TAU); ctx.fill();
+  } else if (race === 'thraddash') {
+    // Thraddash - brutish pig-like face, tusks, angry
+    ctx.fillStyle = '#110800'; ctx.fillRect(x, y, W2, H2);
+    // Big brutish head
+    ctx.fillStyle = '#884411';
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 18, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa5522';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 15, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cc6633';
+    ctx.beginPath(); ctx.arc(x + 32, y + 28, 12, 0, TAU); ctx.fill();
+    // Angry brow ridge
+    ctx.fillStyle = '#884411';
+    ctx.fillRect(x + 18, y + 22, 28, 4);
+    // Small angry eyes under brow
+    ctx.fillStyle = '#ff4400'; ctx.beginPath(); ctx.arc(x + 26, y + 26, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 38, y + 26, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 26, y + 26, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 38, y + 26, 1.5, 0, TAU); ctx.fill();
+    // Snout
+    ctx.fillStyle = '#bb5522';
+    ctx.fillRect(x + 26, y + 32, 12, 8);
+    ctx.fillStyle = '#111'; ctx.fillRect(x + 28, y + 34, 3, 2); ctx.fillRect(x + 33, y + 34, 3, 2);
+    // Tusks
+    ctx.fillStyle = '#eeddcc';
+    ctx.beginPath(); ctx.moveTo(x + 24, y + 38); ctx.lineTo(x + 20, y + 48); ctx.lineTo(x + 28, y + 40); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 40, y + 38); ctx.lineTo(x + 44, y + 48); ctx.lineTo(x + 36, y + 40); ctx.fill();
+  } else if (race === 'ilwrath') {
+    // Ilwrath - dark spider/insect, cluster of red eyes, sharp mandibles, legs
+    ctx.fillStyle = '#06000a'; ctx.fillRect(x, y, W2, H2);
+    // Dark cephalothorax
+    ctx.fillStyle = '#1a0828';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 18, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2a1040';
+    ctx.beginPath(); ctx.arc(x + 32, y + 28, 14, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3a1858';
+    ctx.beginPath(); ctx.arc(x + 32, y + 26, 10, 0, TAU); ctx.fill();
+    // Cluster of 8 red eyes (arranged in spider pattern)
+    ctx.fillStyle = '#ff0044';
+    // Main pair (large)
+    ctx.beginPath(); ctx.arc(x + 24, y + 24, 4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40, y + 24, 4, 0, TAU); ctx.fill();
+    // Secondary pair
+    ctx.fillStyle = '#cc0033';
+    ctx.beginPath(); ctx.arc(x + 28, y + 19, 2.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 36, y + 19, 2.5, 0, TAU); ctx.fill();
+    // Tertiary pair
+    ctx.fillStyle = '#aa0028';
+    ctx.beginPath(); ctx.arc(x + 26, y + 29, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 38, y + 29, 2, 0, TAU); ctx.fill();
+    // Tiny inner pair
+    ctx.fillStyle = '#880022';
+    ctx.beginPath(); ctx.arc(x + 31, y + 17, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 33, y + 17, 1.5, 0, TAU); ctx.fill();
+    // Eye reflections
+    ctx.fillStyle = '#ff4466'; ctx.fillRect(x + 23, y + 22, 1, 1); ctx.fillRect(x + 39, y + 22, 1, 1);
+    // Sharp mandibles/fangs
+    ctx.fillStyle = '#2a1040';
+    ctx.beginPath(); ctx.moveTo(x + 26, y + 34); ctx.lineTo(x + 18, y + 50); ctx.lineTo(x + 22, y + 46); ctx.lineTo(x + 30, y + 36); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 38, y + 34); ctx.lineTo(x + 46, y + 50); ctx.lineTo(x + 42, y + 46); ctx.lineTo(x + 34, y + 36); ctx.fill();
+    // Fang tips
+    ctx.fillStyle = '#4a2068'; ctx.fillRect(x + 18, y + 48, 2, 2); ctx.fillRect(x + 44, y + 48, 2, 2);
+    // Spider legs (4 pairs)
+    ctx.fillStyle = '#1a0828';
+    for (let i = 0; i < 4; i++) {
+      const la = -0.3 + i * 0.3;
+      ctx.fillRect(x + 6 + i * 3, y + 32 + i * 4, 2, 18 - i * 3);
+      ctx.fillRect(x + 54 - i * 3, y + 32 + i * 4, 2, 18 - i * 3);
+    }
+  } else if (race === 'umgah') {
+    // Umgah - blobby pink mass, eyestalks, goofy prankster grin, tentacles
+    ctx.fillStyle = '#110808'; ctx.fillRect(x, y, W2, H2);
+    // Blobby asymmetric body mass
+    ctx.fillStyle = '#993355';
+    ctx.beginPath(); ctx.arc(x + 30, y + 38, 22, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#bb5577';
+    ctx.beginPath(); ctx.arc(x + 32, y + 36, 18, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#dd7799';
+    ctx.beginPath(); ctx.arc(x + 34, y + 34, 14, 0, TAU); ctx.fill();
+    // Fleshy bumps
+    ctx.fillStyle = '#cc6688';
+    ctx.beginPath(); ctx.arc(x + 18, y + 32, 6, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 48, y + 36, 5, 0, TAU); ctx.fill();
+    // Eyestalks (two, different heights)
+    const ew = Math.sin(frame * 0.04) * 2;
+    ctx.fillStyle = '#dd7799';
+    ctx.fillRect(x + 24 + ew, y + 8, 3, 18);
+    ctx.fillRect(x + 38 - ew, y + 12, 3, 14);
+    // Eyes on stalks
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 25 + ew, y + 10, 5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 39 - ew, y + 14, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 26 + ew, y + 10, 2.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 40 - ew, y + 14, 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 24 + ew, y + 8, 1, 1); ctx.fillRect(x + 38 - ew, y + 12, 1, 1);
+    // Wide goofy grin (the Umgah love pranks)
+    ctx.fillStyle = '#882244';
+    ctx.beginPath(); ctx.arc(x + 34, y + 40, 10, 0.1, Math.PI - 0.1); ctx.fill();
+    ctx.fillStyle = '#ffccdd';
+    for (let i = 0; i < 5; i++) ctx.fillRect(x + 26 + i * 3, y + 40, 2, 2);
+    // Tentacle appendages waving
+    ctx.fillStyle = '#cc6688';
+    const tw = Math.sin(frame * 0.05) * 4;
+    ctx.fillRect(x + 4 + tw, y + 34, 10, 3);
+    ctx.fillRect(x + 50 - tw, y + 32, 10, 3);
+    ctx.fillRect(x + 2 + tw, y + 44, 8, 3);
+    ctx.fillRect(x + 54 - tw, y + 42, 8, 3);
+  } else if (race === 'vux') {
+    // VUX - green one-eyed alien, tentacles, disgusted/snooty expression
+    ctx.fillStyle = '#001108'; ctx.fillRect(x, y, W2, H2);
+    // Bulbous green head
+    ctx.fillStyle = '#1a4422';
+    ctx.beginPath(); ctx.arc(x + 32, y + 26, 20, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2a6633';
+    ctx.beginPath(); ctx.arc(x + 32, y + 24, 17, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3a8844';
+    ctx.beginPath(); ctx.arc(x + 32, y + 22, 13, 0, TAU); ctx.fill();
+    // Single large cyclopean eye (THE VUX defining feature)
+    ctx.fillStyle = '#ddeedd'; ctx.beginPath(); ctx.arc(x + 32, y + 20, 10, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ccddbb'; ctx.beginPath(); ctx.arc(x + 32, y + 20, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#88aa00'; ctx.beginPath(); ctx.arc(x + 32, y + 20, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 32, y + 20, 2.5, 0, TAU); ctx.fill();
+    // Snooty eyelid (half-closed, disgusted look)
+    ctx.fillStyle = '#3a8844';
+    ctx.fillRect(x + 20, y + 12, 24, 6);
+    // Pursed disapproving mouth
+    ctx.fillStyle = '#1a4422';
+    ctx.beginPath(); ctx.arc(x + 32, y + 34, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#0a2211'; ctx.fillRect(x + 28, y + 33, 8, 2);
+    // Tentacles/face tendrils hanging down
+    ctx.fillStyle = '#2a6633';
+    for (let i = 0; i < 6; i++) {
+      const tx = x + 14 + i * 7;
+      const tw2 = Math.sin(frame * 0.035 + i * 1.2) * 3;
+      ctx.fillRect(tx + tw2, y + 40, 2, 16 + Math.sin(frame * 0.05 + i) * 4);
+    }
+    // Bumpy brow ridges
+    ctx.fillStyle = '#2a5533';
+    ctx.beginPath(); ctx.arc(x + 22, y + 14, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 42, y + 14, 3, 0, TAU); ctx.fill();
+  } else if (race === 'arilou') {
+    // Arilou Lalee'lay - green-tinged grey alien, HUGE solid black almond eyes
+    ctx.fillStyle = '#040810'; ctx.fillRect(x, y, W2, H2);
+    // Subtle starfield/dimensional background
+    for (let i = 0; i < 10; i++) {
+      ctx.globalAlpha = 0.15 + Math.sin(frame * 0.03 + i * 0.7) * 0.1;
+      ctx.fillStyle = '#3366aa';
+      ctx.fillRect(x + (i * 7 + 3) % 60, y + (i * 11 + 5) % 60, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+    // Huge bulbous head (wider at top, narrow chin) - greenish-grey
+    ctx.fillStyle = '#6a9966';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 24, 20, 16, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#88bb88';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 22, 17, 13, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aaddaa';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 21, 13, 10, 0, 0, TAU); ctx.fill();
+    // Pointed chin
+    ctx.fillStyle = '#88bb88';
+    ctx.beginPath(); ctx.moveTo(x + 26, y + 32); ctx.lineTo(x + 32, y + 42); ctx.lineTo(x + 38, y + 32); ctx.fill();
+    // HUGE solid black almond-shaped eyes (the Arilou signature)
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.ellipse(x + 22, y + 22, 8, 10, -0.4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 42, y + 22, 8, 10, 0.4, 0, TAU); ctx.fill();
+    // Slight sheen on eyes
+    ctx.fillStyle = '#223344';
+    ctx.beginPath(); ctx.ellipse(x + 20, y + 20, 3, 4, -0.4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 40, y + 20, 3, 4, 0.4, 0, TAU); ctx.fill();
+    // Tiny slit mouth
+    ctx.fillStyle = '#668866'; ctx.fillRect(x + 30, y + 36, 4, 1);
+    // Thin neck/body
+    ctx.fillStyle = '#88bb88'; ctx.fillRect(x + 29, y + 42, 6, 16);
+    ctx.fillStyle = '#aaddaa'; ctx.fillRect(x + 30, y + 44, 4, 12);
+  } else if (race === 'druuge') {
+    // Druuge - pig-like greedy merchant, snout, beady eyes, collar
+    ctx.fillStyle = '#110800'; ctx.fillRect(x, y, W2, H2);
+    // Pig-like head (round, fleshy)
+    ctx.fillStyle = '#885533';
+    ctx.beginPath(); ctx.arc(x + 32, y + 26, 16, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa6644';
+    ctx.beginPath(); ctx.arc(x + 32, y + 24, 13, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cc7755';
+    ctx.beginPath(); ctx.arc(x + 32, y + 22, 10, 0, TAU); ctx.fill();
+    // Pig snout (prominent)
+    ctx.fillStyle = '#bb6644';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cc7755';
+    ctx.beginPath(); ctx.arc(x + 32, y + 29, 5, 0, TAU); ctx.fill();
+    // Nostrils
+    ctx.fillStyle = '#553322'; ctx.fillRect(x + 29, y + 29, 2, 2); ctx.fillRect(x + 33, y + 29, 2, 2);
+    // Small beady greedy eyes
+    ctx.fillStyle = '#ff4400'; ctx.beginPath(); ctx.arc(x + 25, y + 20, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 39, y + 20, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(x + 25, y + 20, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 39, y + 20, 1.5, 0, TAU); ctx.fill();
+    // Pointed ears
+    ctx.fillStyle = '#aa6644';
+    ctx.beginPath(); ctx.moveTo(x + 18, y + 16); ctx.lineTo(x + 14, y + 6); ctx.lineTo(x + 22, y + 14); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 46, y + 16); ctx.lineTo(x + 50, y + 6); ctx.lineTo(x + 42, y + 14); ctx.fill();
+    // Greedy grin
+    ctx.fillStyle = '#553322';
+    ctx.beginPath(); ctx.arc(x + 32, y + 34, 6, 0.1, Math.PI - 0.1); ctx.fill();
+    ctx.fillStyle = '#eeddcc';
+    for (let i = 0; i < 4; i++) ctx.fillRect(x + 27 + i * 3, y + 34, 2, 1);
+    // Merchant high collar / robes
+    ctx.fillStyle = '#554422'; ctx.fillRect(x + 20, y + 38, 24, 22);
+    ctx.fillStyle = '#ffcc44'; ctx.fillRect(x + 30, y + 38, 4, 22); // gold trim
+    ctx.fillStyle = '#666'; ctx.fillRect(x + 20, y + 38, 24, 2); // collar edge
+  } else if (race === 'syreen') {
+    // Syreen - blue-skinned humanoid woman, flowing dark hair, alluring
+    ctx.fillStyle = '#000818'; ctx.fillRect(x, y, W2, H2);
+    // Flowing dark blue hair (behind head)
+    ctx.fillStyle = '#0a1a44';
+    ctx.beginPath(); ctx.arc(x + 32, y + 20, 18, 0, TAU); ctx.fill();
+    // Hair flowing down sides
+    ctx.fillStyle = '#0a1a44';
+    ctx.beginPath(); ctx.moveTo(x + 14, y + 18); ctx.lineTo(x + 12, y + 48); ctx.lineTo(x + 20, y + 46); ctx.lineTo(x + 18, y + 18); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 46, y + 18); ctx.lineTo(x + 52, y + 48); ctx.lineTo(x + 44, y + 46); ctx.lineTo(x + 46, y + 18); ctx.fill();
+    // Hair highlights
+    ctx.fillStyle = '#1a2a55'; ctx.fillRect(x + 14, y + 22, 2, 18); ctx.fillRect(x + 48, y + 22, 2, 18);
+    // Face - oval, blue skin
+    ctx.fillStyle = '#4488cc';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 24, 12, 14, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#66aadd';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 22, 10, 11, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#77bbee';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 21, 8, 9, 0, 0, TAU); ctx.fill();
+    // Large alluring eyes
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(x + 26, y + 20, 4, 3, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 38, y + 20, 4, 3, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#1133aa'; ctx.beginPath(); ctx.arc(x + 26, y + 20, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 38, y + 20, 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.fillRect(x + 25, y + 19, 1, 1); ctx.fillRect(x + 37, y + 19, 1, 1);
+    // Eyelashes
+    ctx.fillStyle = '#0a1a44'; ctx.fillRect(x + 22, y + 17, 8, 1); ctx.fillRect(x + 34, y + 17, 8, 1);
+    // Nose
+    ctx.fillStyle = '#5599cc'; ctx.fillRect(x + 31, y + 24, 2, 3);
+    // Full lips
+    ctx.fillStyle = '#ee5577';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 30, 4, 2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cc3355'; ctx.fillRect(x + 29, y + 30, 6, 1);
+    // Uniform body
+    ctx.fillStyle = '#1a3366'; ctx.fillRect(x + 22, y + 38, 20, 22);
+    ctx.fillStyle = '#2a4488'; ctx.fillRect(x + 24, y + 40, 16, 18);
+    // Rank insignia and collar
+    ctx.fillStyle = '#ffcc44'; ctx.fillRect(x + 26, y + 42, 4, 2); ctx.fillRect(x + 22, y + 38, 20, 2);
+  } else if (race === 'shofixti') {
+    // Shofixti - small furry marsupial warrior, huge ears, red headband, fierce
+    ctx.fillStyle = '#080800'; ctx.fillRect(x, y, W2, H2);
+    // Big pointed ears (larger, more prominent)
+    ctx.fillStyle = '#aa7744';
+    ctx.beginPath(); ctx.moveTo(x + 18, y + 18); ctx.lineTo(x + 10, y + 2); ctx.lineTo(x + 24, y + 16); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 46, y + 18); ctx.lineTo(x + 54, y + 2); ctx.lineTo(x + 40, y + 16); ctx.fill();
+    // Ear insides
+    ctx.fillStyle = '#dd9966';
+    ctx.beginPath(); ctx.moveTo(x + 18, y + 18); ctx.lineTo(x + 12, y + 6); ctx.lineTo(x + 22, y + 16); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 46, y + 18); ctx.lineTo(x + 52, y + 6); ctx.lineTo(x + 42, y + 16); ctx.fill();
+    // Furry round head
+    ctx.fillStyle = '#886633';
+    ctx.beginPath(); ctx.arc(x + 32, y + 28, 14, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa8844';
+    ctx.beginPath(); ctx.arc(x + 32, y + 26, 11, 0, TAU); ctx.fill();
+    // Lighter face patch
+    ctx.fillStyle = '#ccaa66';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 26, 8, 9, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ddbb77';
+    ctx.beginPath(); ctx.ellipse(x + 32, y + 25, 6, 7, 0, 0, TAU); ctx.fill();
+    // Red warrior headband (iconic)
+    ctx.fillStyle = '#dd2200'; ctx.fillRect(x + 18, y + 18, 28, 3);
+    ctx.fillStyle = '#ff3300'; ctx.fillRect(x + 18, y + 19, 28, 1);
+    // Headband tails
+    ctx.fillStyle = '#dd2200';
+    ctx.beginPath(); ctx.moveTo(x + 46, y + 18); ctx.lineTo(x + 56, y + 14); ctx.lineTo(x + 54, y + 20); ctx.lineTo(x + 46, y + 21); ctx.fill();
+    // Determined dark eyes
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(x + 27, y + 24, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 37, y + 24, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 26, y + 23, 1, 1); ctx.fillRect(x + 36, y + 23, 1, 1);
+    // Small black nose
+    ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 2, 0, TAU); ctx.fill();
+    // Determined grin
+    ctx.fillStyle = '#775522';
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 4, 0.2, Math.PI - 0.2); ctx.fill();
+    // Whiskers
+    ctx.fillStyle = '#aa9966';
+    ctx.fillRect(x + 14, y + 28, 10, 1); ctx.fillRect(x + 40, y + 28, 10, 1);
+    ctx.fillRect(x + 16, y + 30, 8, 1); ctx.fillRect(x + 40, y + 30, 8, 1);
+    // Small body
+    ctx.fillStyle = '#aa8844'; ctx.fillRect(x + 26, y + 42, 12, 16);
+    ctx.fillStyle = '#ccaa66'; ctx.fillRect(x + 28, y + 44, 8, 12);
   }
 }
 
