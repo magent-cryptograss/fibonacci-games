@@ -2763,94 +2763,122 @@ function drawAlienPortrait(race, x, y) {
 // ==================== SCREEN: TITLE ====================
 function drawTitle() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  drawStarField(frame, 0, 100);
 
-  // SC2 spinning planet in center background
-  const plR = 40;
-  const plX = W/2, plY = H/2 + 20;
-  ctx.globalAlpha = 0.06; ctx.fillStyle = '#4488ff';
-  ctx.beginPath(); ctx.arc(plX, plY, plR + 20, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 0.12;
-  ctx.beginPath(); ctx.arc(plX, plY, plR + 10, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 0.4;
-  ctx.fillStyle = '#112244';
-  ctx.beginPath(); ctx.arc(plX, plY, plR, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#1a3366';
-  ctx.beginPath(); ctx.arc(plX, plY, plR - 2, 0, TAU); ctx.fill();
-  // Planet surface features
-  ctx.save(); ctx.beginPath(); ctx.arc(plX, plY, plR - 2, 0, TAU); ctx.clip();
-  const pRot = frame * 0.005;
-  ctx.fillStyle = '#224422'; ctx.globalAlpha = 0.6;
-  for (let c = 0; c < 6; c++) {
-    const ca = pRot + c * 1.1;
-    ctx.beginPath(); ctx.arc(plX + Math.cos(ca) * 18, plY + Math.sin(c * 2) * 12, 12 + c * 2, 0, TAU); ctx.fill();
+  // === SC2 Title: Deep space with slowly rotating star system ===
+  // Distant stars (denser than normal, multi-colored like SC2 intro)
+  for (let i = 0; i < 120; i++) {
+    const sx = (i * 137.5 + frame * 0.05) % W;
+    const sy = (i * 91.3 + Math.sin(i * 0.3) * 40) % H;
+    const brightness = 0.3 + Math.sin(frame * 0.01 + i) * 0.2;
+    ctx.globalAlpha = brightness;
+    const colors = ['#ffffff', '#aaccff', '#ffccaa', '#ffff88', '#ffaaaa'];
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(sx, sy, 1, 1);
   }
-  ctx.restore();
-  ctx.globalAlpha = 0.4; ctx.fillStyle = '#000';
-  ctx.beginPath(); ctx.arc(plX + 15, plY + 12, plR, 0, TAU); ctx.fill();
   ctx.globalAlpha = 1;
 
-  // SC2 style: two fleets fighting — red ships left, blue ships right
-  const ships = ['urquan','mycon','orz'];
-  const allies = ['player','spathi','pkunk'];
-  for (let si = 0; si < 3; si++) {
-    // Red fleet (enemies) — left side, flying right
-    const def = SHIP_TYPES[ships[si]];
-    const ex = 30 + Math.sin(frame * 0.02 + si * 1.5) * 12;
-    const ey = 30 + si * 28 + Math.cos(frame * 0.015 + si) * 5;
-    ctx.save(); ctx.translate(ex, ey); ctx.rotate(-Math.PI / 2); ctx.scale(0.6, 0.6);
-    def.draw({ flash: 0, thrusting: true, def, shieldTimer: 0 }); ctx.restore();
-    // Blue fleet (allies) — right side, flying left
-    const aDef = SHIP_TYPES[allies[si]];
-    const ax = W - 30 + Math.sin(frame * 0.02 + si * 1.2) * 12;
-    const ay = 30 + si * 28 + Math.cos(frame * 0.018 + si) * 5;
-    ctx.save(); ctx.translate(ax, ay); ctx.rotate(Math.PI / 2); ctx.scale(0.6, 0.6);
-    aDef.draw({ flash: 0, thrusting: true, def: aDef, shieldTimer: 0 }); ctx.restore();
+  // Large spinning planet (SC2's Earth or alien world)
+  const plX = W/2, plY = H/2 + 30;
+  const plR = 50;
+  // Atmospheric glow
+  ctx.globalAlpha = 0.04; ctx.fillStyle = '#4488ff';
+  ctx.beginPath(); ctx.arc(plX, plY, plR + 25, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.08;
+  ctx.beginPath(); ctx.arc(plX, plY, plR + 15, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.15;
+  ctx.beginPath(); ctx.arc(plX, plY, plR + 6, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Planet body
+  ctx.fillStyle = '#0a2244';
+  ctx.beginPath(); ctx.arc(plX, plY, plR, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1a3366';
+  ctx.beginPath(); ctx.arc(plX, plY, plR - 1, 0, TAU); ctx.fill();
+  // Rotating surface (continents + oceans)
+  ctx.save(); ctx.beginPath(); ctx.arc(plX, plY, plR - 1, 0, TAU); ctx.clip();
+  const pRot = frame * 0.004;
+  ctx.fillStyle = '#225522'; ctx.globalAlpha = 0.5;
+  for (let c = 0; c < 8; c++) {
+    const ca = pRot + c * 0.9;
+    const cr = 8 + (c % 3) * 5;
+    ctx.beginPath(); ctx.arc(plX + Math.cos(ca) * 24, plY + Math.sin(c * 1.7) * 16, cr, 0, TAU); ctx.fill();
   }
-  // Weapon bolts between fleets
-  for (let b = 0; b < 5; b++) {
-    const bx = 60 + ((frame * 3 + b * 60) % (W - 120));
-    const by = 30 + (b * 37 + Math.sin(frame * 0.1 + b) * 8) % 80;
-    ctx.fillStyle = b % 2 ? '#ff4444' : '#44aaff';
-    ctx.fillRect(bx, by, 4, 2);
+  // Ice caps
+  ctx.globalAlpha = 0.4; ctx.fillStyle = '#bbddff';
+  ctx.fillRect(plX - 20, plY - plR + 2, 40, 6);
+  ctx.fillRect(plX - 16, plY + plR - 8, 32, 6);
+  // Cloud wisps
+  ctx.globalAlpha = 0.2; ctx.fillStyle = '#fff';
+  for (let c = 0; c < 4; c++) {
+    const ca = pRot * 1.2 + c * 1.5;
+    ctx.fillRect(plX + Math.cos(ca) * 20 - 10, plY - 15 + c * 10, 20, 2);
+  }
+  ctx.globalAlpha = 1; ctx.restore();
+  // Shadow (SC2 had strong terminator shadow)
+  ctx.globalAlpha = 0.5; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(plX + 18, plY + 14, plR + 2, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Orbiting ships around planet (SC2 intro had ships in orbit)
+  const orbitShips = ['player', 'urquan', 'spathi', 'chmmr', 'yehat'];
+  for (let si = 0; si < orbitShips.length; si++) {
+    const def = SHIP_TYPES[orbitShips[si]];
+    const oa = frame * (0.008 + si * 0.003) + si * TAU / orbitShips.length;
+    const orR = plR + 20 + si * 12;
+    const sx = plX + Math.cos(oa) * orR;
+    const sy = plY + Math.sin(oa) * orR * 0.35;
+    // Only draw if in front of planet (simple z-sort)
+    if (Math.sin(oa) > -0.3) {
+      ctx.save(); ctx.translate(sx, sy); ctx.rotate(oa + Math.PI/2); ctx.scale(0.4, 0.4);
+      def.draw({ flash: 0, thrusting: true, def, shieldTimer: 0 }); ctx.restore();
+    }
   }
 
   ctx.textAlign = 'center';
 
-  // === SC2 title block ===
-  // Top red bar
-  ctx.fillStyle = '#880000'; ctx.fillRect(W/2 - 110, 120, 220, 2);
-  // Title background
-  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(W/2 - 110, 122, 220, 50);
-  // "STAR CONTROL" in large red, SC2 style
-  ctx.fillStyle = '#330000'; ctx.font = 'bold 22px monospace';
-  ctx.fillText('STAR CONTROL', W/2 + 1, 140);
+  // === SC2 Title Block ===
+  // Dark backdrop for title
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(W/2 - 130, 20, 260, 80);
+  // Red top line
+  ctx.fillStyle = '#cc0000'; ctx.fillRect(W/2 - 130, 20, 260, 2);
+  // Blue bottom line
+  ctx.fillStyle = '#0000cc'; ctx.fillRect(W/2 - 130, 98, 260, 2);
+
+  // "STAR" in red (SC2's two-tone title)
+  ctx.fillStyle = '#440000'; ctx.font = 'bold 28px monospace';
+  ctx.fillText('STAR', W/2 - 48 + 1, 52 + 1);
   ctx.fillStyle = '#dd0000';
-  ctx.fillText('STAR CONTROL', W/2, 139);
-  // Bright red top edge on letters
-  ctx.globalAlpha = 0.5; ctx.fillStyle = '#ff4444';
-  ctx.fillRect(W/2 - 90, 125, 180, 2);
-  ctx.globalAlpha = 1;
-  // Subtitle — blue, like "The Ur-Quan Masters"
-  ctx.fillStyle = '#2244aa'; ctx.font = 'bold 11px monospace';
-  ctx.fillText('THE VOID BEYOND', W/2, 157);
-  // Blue bottom bar
-  ctx.fillStyle = '#000088'; ctx.fillRect(W/2 - 110, 162, 220, 2);
-  // Red/blue divider (SC2 iconic)
-  ctx.fillStyle = '#cc0000'; ctx.fillRect(W/2 - 110, 164, 110, 2);
-  ctx.fillStyle = '#0000cc'; ctx.fillRect(W/2, 164, 110, 2);
+  ctx.fillText('STAR', W/2 - 48, 52);
+  // "CONTROL" in blue
+  ctx.fillStyle = '#000044'; ctx.font = 'bold 28px monospace';
+  ctx.fillText('CONTROL', W/2 + 30 + 1, 52 + 1);
+  ctx.fillStyle = '#4444dd';
+  ctx.fillText('CONTROL', W/2 + 30, 52);
+  // "II" in gold
+  ctx.fillStyle = '#886600'; ctx.font = 'bold 18px monospace';
+  ctx.fillText('II', W/2 + 1, 72 + 1);
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText('II', W/2, 72);
 
-  // Story text below
+  // Subtitle — SC2 style
+  ctx.fillStyle = '#6688aa'; ctx.font = 'bold 9px monospace';
+  ctx.fillText('THE VOID BEYOND', W/2, 88);
+
+  // Red/blue divider line (SC2's iconic split)
+  ctx.fillStyle = '#cc0000'; ctx.fillRect(W/2 - 130, 92, 130, 2);
+  ctx.fillStyle = '#0000cc'; ctx.fillRect(W/2, 92, 130, 2);
+
+  // Story text
   ctx.fillStyle = '#88aacc'; ctx.font = '8px monospace';
-  ctx.fillText('The Sa-Matra is destroyed.', W/2, 180);
-  ctx.fillText('But its explosion tore a rift', W/2, 190);
-  ctx.fillText('between dimensions...', W/2, 200);
+  ctx.fillText('The Sa-Matra is destroyed.', W/2, 115);
+  ctx.fillText('But its explosion tore a rift between dimensions...', W/2, 127);
 
-  ctx.fillStyle = '#556677'; ctx.font = '8px monospace';
-  ctx.fillText('ARROWS move  Z shoot  X special  SPACE interact', W/2, H - 14);
+  // Controls
+  ctx.fillStyle = '#445566'; ctx.font = '7px monospace';
+  ctx.fillText('ARROWS move   Z shoot   X special   SPACE interact', W/2, H - 14);
 
-  ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace';
-  if (Math.floor(Date.now() / 500) % 2) ctx.fillText('PRESS ANY KEY TO START', W/2, H - 4);
+  // Blinking start
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace';
+  if (Math.floor(Date.now() / 500) % 2) ctx.fillText('PRESS ANY KEY TO START', W/2, H - 3);
   ctx.textAlign = 'left';
 }
 
@@ -3280,79 +3308,121 @@ function updateUpgrade() {
 }
 
 function drawUpgrade() {
-  ctx.fillStyle = 'rgba(0,0,20,0.95)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#04041a'; ctx.fillRect(0, 0, W, H);
 
-  // Title
+  // === SC2 Ship Outline Outfit Screen ===
+  // Top bar
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(0, 0, W, 2);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 10px monospace';
-  ctx.fillText('SHIP MODULES', W/2, 16);
-  ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
-  ctx.fillText(`Minerals: ${minerals}   Slots: ${modules.length}/${MAX_MODULES}`, W/2, 28);
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 10px monospace';
+  ctx.fillText('SHIP CONFIGURATION', W/2, 16);
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+  ctx.fillText(`Resource Units: ${minerals}`, W/2, 26);
 
-  // Available modules list (left side)
+  // === CENTER: Ship outline with module slots around it ===
+  const shipCX = W/2, shipCY = 100;
+  // Ship outline (large wireframe Vindicator)
+  ctx.strokeStyle = '#224488'; ctx.lineWidth = 1;
+  // Hull outline
+  ctx.beginPath();
+  ctx.moveTo(shipCX, shipCY - 30); // nose
+  ctx.lineTo(shipCX - 8, shipCY - 20);
+  ctx.lineTo(shipCX - 6, shipCY + 14);
+  ctx.lineTo(shipCX - 12, shipCY + 16); // engine wing left
+  ctx.lineTo(shipCX - 12, shipCY + 24);
+  ctx.lineTo(shipCX - 4, shipCY + 22);
+  ctx.lineTo(shipCX + 4, shipCY + 22);
+  ctx.lineTo(shipCX + 12, shipCY + 24);
+  ctx.lineTo(shipCX + 12, shipCY + 16);
+  ctx.lineTo(shipCX + 6, shipCY + 14);
+  ctx.lineTo(shipCX + 8, shipCY - 20);
+  ctx.closePath();
+  ctx.stroke();
+  // Module pod outlines (left + right)
+  ctx.strokeRect(shipCX - 22, shipCY - 8, 10, 16);
+  ctx.strokeRect(shipCX + 12, shipCY - 8, 10, 16);
+  // Cockpit
+  ctx.fillStyle = '#224488'; ctx.fillRect(shipCX - 3, shipCY - 22, 6, 4);
+  // Engine glow
+  ctx.fillStyle = '#223366';
+  ctx.fillRect(shipCX - 10, shipCY + 22, 4, 3);
+  ctx.fillRect(shipCX - 2, shipCY + 22, 4, 3);
+  ctx.fillRect(shipCX + 6, shipCY + 22, 4, 3);
+
+  // Module slots arranged around the ship (SC2 style - 4 left, 4 right)
+  for (let i = 0; i < MAX_MODULES; i++) {
+    const side = i < 4 ? -1 : 1;
+    const idx = i % 4;
+    const slotX = shipCX + side * 44 - (side > 0 ? 0 : 30);
+    const slotY = 58 + idx * 24;
+    const hasModule = i < modules.length;
+    // Slot background
+    ctx.fillStyle = hasModule ? 'rgba(34,68,34,0.6)' : 'rgba(10,10,30,0.6)';
+    ctx.fillRect(slotX, slotY, 30, 18);
+    ctx.strokeStyle = hasModule ? '#44aa44' : '#223344';
+    ctx.strokeRect(slotX, slotY, 30, 18);
+    // Connector line to ship
+    ctx.strokeStyle = '#1a2244';
+    ctx.beginPath();
+    ctx.moveTo(side < 0 ? slotX + 30 : slotX, slotY + 9);
+    ctx.lineTo(shipCX + side * 12, shipCY - 8 + idx * 5);
+    ctx.stroke();
+    // Module content
+    if (hasModule) {
+      const mod = MODULE_DEFS.find(d => d.name === modules[i]);
+      if (mod) {
+        ctx.fillStyle = mod.icon; ctx.fillRect(slotX + 2, slotY + 2, 5, 5);
+        ctx.fillStyle = '#aaddaa'; ctx.font = '6px monospace';
+        ctx.fillText(mod.name.substring(0, 6), slotX + 9, slotY + 7);
+        ctx.fillStyle = '#668866'; ctx.fillText(mod.desc.substring(0, 8), slotX + 2, slotY + 14);
+      }
+    } else {
+      ctx.fillStyle = '#333'; ctx.font = '6px monospace';
+      ctx.fillText('empty', slotX + 6, slotY + 11);
+    }
+  }
+
+  // === BOTTOM: Available modules list ===
+  const listY = 160;
+  ctx.fillStyle = '#0a0a22'; ctx.fillRect(4, listY, W - 8, H - listY - 16);
+  ctx.strokeStyle = '#223366'; ctx.strokeRect(4, listY, W - 8, H - listY - 16);
+  ctx.fillStyle = '#4488ff'; ctx.fillRect(4, listY, W - 8, 2);
+
+  ctx.fillStyle = '#6688bb'; ctx.font = 'bold 7px monospace';
+  ctx.fillText('AVAILABLE MODULES', W/2, listY + 12);
+
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#88aacc'; ctx.font = 'bold 8px monospace';
-  ctx.fillText('AVAILABLE', 8, 44);
+  const cols = 2;
+  const colW = (W - 20) / cols;
   for (let i = 0; i < MODULE_DEFS.length; i++) {
     const mod = MODULE_DEFS[i];
-    const y = 54 + i * 17;
+    const col = i < 5 ? 0 : 1;
+    const row = i < 5 ? i : i - 5;
+    const mx = 10 + col * colW;
+    const my = listY + 20 + row * 14;
     const sel = i === upgradeCursor;
     const canBuy = minerals >= mod.cost && modules.length < MAX_MODULES;
 
     if (sel) {
-      ctx.fillStyle = 'rgba(68,136,255,0.2)';
-      ctx.fillRect(4, y - 8, W/2 - 8, 15);
-      ctx.strokeStyle = '#4488ff'; ctx.strokeRect(4, y - 8, W/2 - 8, 15);
+      ctx.fillStyle = 'rgba(34,68,170,0.3)';
+      ctx.fillRect(mx - 2, my - 6, colW - 4, 13);
+      ctx.strokeStyle = '#4488ff'; ctx.strokeRect(mx - 2, my - 6, colW - 4, 13);
     }
-
-    // Module icon dot
-    ctx.fillStyle = mod.icon; ctx.fillRect(8, y - 4, 6, 6);
-
-    // Name
-    ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = '8px monospace';
-    ctx.fillText(mod.name, 18, y + 2);
-
-    // Cost
-    ctx.fillStyle = canBuy ? '#ffcc44' : '#ff4444';
-    ctx.fillText(`${mod.cost}m`, W/2 - 32, y + 2);
+    ctx.fillStyle = mod.icon; ctx.fillRect(mx, my - 4, 5, 5);
+    ctx.fillStyle = sel ? '#fff' : '#8888aa'; ctx.font = '7px monospace';
+    ctx.fillText(mod.name, mx + 8, my + 1);
+    ctx.fillStyle = canBuy ? '#ffcc44' : '#664422';
+    ctx.fillText(`${mod.cost}`, mx + colW - 30, my + 1);
   }
 
-  // Selected module description
+  // Description of selected module
   const selMod = MODULE_DEFS[upgradeCursor];
-  ctx.fillStyle = '#555'; ctx.fillRect(4, H - 30, W/2 - 8, 14);
-  ctx.fillStyle = '#ccddff'; ctx.font = '8px monospace';
-  ctx.fillText(selMod.desc, 8, H - 20);
-
-  // Installed modules (right side)
-  ctx.fillStyle = '#88aacc'; ctx.font = 'bold 8px monospace';
-  ctx.fillText('INSTALLED', W/2 + 8, 44);
-
-  // Module slots visualization
-  for (let i = 0; i < MAX_MODULES; i++) {
-    const y = 54 + i * 17;
-    const x = W/2 + 8;
-    ctx.fillStyle = i < modules.length ? 'rgba(40,80,40,0.5)' : 'rgba(20,20,40,0.5)';
-    ctx.fillRect(x, y - 8, W/2 - 16, 15);
-    ctx.strokeStyle = i < modules.length ? '#446644' : '#333';
-    ctx.strokeRect(x, y - 8, W/2 - 16, 15);
-
-    if (i < modules.length) {
-      const mod = MODULE_DEFS.find(d => d.name === modules[i]);
-      if (mod) {
-        ctx.fillStyle = mod.icon; ctx.fillRect(x + 4, y - 4, 6, 6);
-        ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
-        ctx.fillText(mod.name, x + 14, y + 2);
-      }
-    } else {
-      ctx.fillStyle = '#444'; ctx.font = '8px monospace';
-      ctx.fillText('- empty -', x + 14, y + 2);
-    }
-  }
-
-  // Controls help
+  ctx.fillStyle = '#aaccff'; ctx.font = '8px monospace';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#555'; ctx.font = '8px monospace';
-  ctx.fillText('SPACE install  BACKSPACE remove  Q back', W/2, H - 4);
+  ctx.fillText(`${selMod.name}: ${selMod.desc}`, W/2, H - 20);
+
+  ctx.fillStyle = '#445566'; ctx.font = '7px monospace';
+  ctx.fillText('SPACE install   BACKSPACE remove   Q back', W/2, H - 4);
   ctx.textAlign = 'left';
 }
 
@@ -3431,118 +3501,182 @@ function updateStarbase() {
 
 function drawStarbase() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  drawStarField(0, 0, 60);
 
-  // Station body - SC2 style rotating station
-  const cx = W / 2, cy = 80;
-  const rot = frame * 0.005;
+  // === SC2 Starbase Layout: Left=Hayes portrait, Right=Station+Menu ===
+  const portW = Math.floor(W * 0.35);
+  const portH = Math.floor(H * 0.55);
 
-  // Outer ring
-  ctx.strokeStyle = '#556677'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.ellipse(cx, cy, 50, 18, 0, 0, TAU); ctx.stroke();
-  ctx.lineWidth = 1;
+  // === LEFT PANEL: Commander Hayes Portrait ===
+  ctx.fillStyle = '#08081a'; ctx.fillRect(0, 0, portW, portH);
+  // Hayes face - human military commander
+  const hx = portW / 2, hy = portH / 2 - 10;
+  // Dark uniform background
+  ctx.fillStyle = '#1a1a2a'; ctx.fillRect(4, 4, portW - 8, portH - 8);
+  // Uniform body
+  ctx.fillStyle = '#1a2244'; ctx.fillRect(hx - 28, hy + 20, 56, 40);
+  ctx.fillStyle = '#223366'; ctx.fillRect(hx - 24, hy + 22, 48, 36);
+  // Collar
+  ctx.fillStyle = '#2a3a6a'; ctx.fillRect(hx - 14, hy + 18, 28, 6);
+  // Rank pins
+  ctx.fillStyle = '#ddaa44'; ctx.fillRect(hx - 12, hy + 20, 3, 2);
+  ctx.fillRect(hx + 9, hy + 20, 3, 2);
+  // Head
+  ctx.fillStyle = '#cc9977';
+  ctx.beginPath(); ctx.ellipse(hx, hy, 16, 20, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#ddaa88';
+  ctx.beginPath(); ctx.ellipse(hx, hy - 2, 14, 17, 0, 0, TAU); ctx.fill();
+  // Hair (short military cut)
+  ctx.fillStyle = '#443322';
+  ctx.beginPath(); ctx.ellipse(hx, hy - 12, 15, 10, 0, Math.PI, TAU); ctx.fill();
+  ctx.fillStyle = '#554433';
+  ctx.fillRect(hx - 14, hy - 14, 28, 4);
+  // Eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(hx - 6, hy - 4, 3, 2.5, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(hx + 6, hy - 4, 3, 2.5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#336699';
+  ctx.beginPath(); ctx.arc(hx - 6, hy - 4, 1.5, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(hx + 6, hy - 4, 1.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.fillRect(hx - 7, hy - 5, 1, 1); ctx.fillRect(hx + 5, hy - 5, 1, 1);
+  // Eyebrows
+  ctx.fillStyle = '#443322';
+  ctx.fillRect(hx - 9, hy - 8, 6, 1); ctx.fillRect(hx + 3, hy - 8, 6, 1);
+  // Nose
+  ctx.fillStyle = '#cc9977'; ctx.fillRect(hx - 1, hy, 2, 5);
+  // Mouth
+  ctx.fillStyle = '#aa7766';
+  ctx.fillRect(hx - 4, hy + 8, 8, 1);
+  // Chin
+  ctx.fillStyle = '#cc9977';
+  ctx.beginPath(); ctx.arc(hx, hy + 12, 6, 0, Math.PI); ctx.fill();
+  // Ears
+  ctx.fillStyle = '#cc9977';
+  ctx.beginPath(); ctx.arc(hx - 15, hy - 2, 3, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(hx + 15, hy - 2, 3, 0, TAU); ctx.fill();
+  // Portrait border
+  ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, portW - 4, portH - 4);
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+  ctx.strokeRect(4, 4, portW - 8, portH - 8);
 
-  // Inner ring
-  ctx.strokeStyle = '#778899'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.ellipse(cx, cy, 30, 10, 0, 0, TAU); ctx.stroke();
-  ctx.lineWidth = 1;
+  // Name plate below portrait
+  ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, portH, portW, H - portH);
+  ctx.strokeStyle = '#4488ff'; ctx.strokeRect(0, portH, portW, H - portH);
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('COMMANDER HAYES', portW / 2, portH + 12);
+  ctx.fillStyle = '#667788'; ctx.font = '7px monospace';
+  ctx.fillText('EARTH STARBASE', portW / 2, portH + 22);
+  // Mini starbase icon
+  ctx.strokeStyle = '#556677'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.ellipse(portW / 2, portH + 38, 20, 6, 0, 0, TAU); ctx.stroke();
+  ctx.fillStyle = '#445566'; ctx.fillRect(portW / 2 - 5, portH + 30, 10, 16);
+  ctx.fillStyle = '#88aacc'; ctx.fillRect(portW / 2 - 2, portH + 42, 4, 2);
 
-  // Central hub
-  ctx.fillStyle = '#334455'; ctx.fillRect(cx - 12, cy - 16, 24, 32);
-  ctx.fillStyle = '#445566'; ctx.fillRect(cx - 10, cy - 14, 20, 28);
-  ctx.fillStyle = '#556677'; ctx.fillRect(cx - 8, cy - 12, 16, 24);
+  // === RIGHT SIDE: Menu + Status ===
+  const menuX = portW + 4;
+  const menuW = W - portW - 8;
 
-  // Docking bay (lit)
-  ctx.fillStyle = '#88aacc'; ctx.fillRect(cx - 4, cy + 10, 8, 6);
-  ctx.fillStyle = '#aaccee'; ctx.fillRect(cx - 2, cy + 12, 4, 2);
+  // SC2-style dark panel background
+  ctx.fillStyle = '#04041a'; ctx.fillRect(menuX, 0, menuW, H);
+  ctx.fillStyle = '#4488ff'; ctx.fillRect(menuX, 0, menuW, 2);
 
-  // Antenna
-  ctx.fillStyle = '#667788'; ctx.fillRect(cx - 1, cy - 24, 2, 12);
-  ctx.fillStyle = '#ff4444'; ctx.fillRect(cx - 2, cy - 26, 4, 3);
+  // Station status header
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('STARBASE OPERATIONS', menuX + menuW / 2, 16);
+  ctx.textAlign = 'left';
 
-  // Blinking lights on ring
-  for (let i = 0; i < 8; i++) {
-    const a = rot + i * TAU / 8;
-    const lx = cx + Math.cos(a) * 50;
-    const ly = cy + Math.sin(a) * 18;
-    ctx.fillStyle = (Math.floor(frame / 15) + i) % 3 === 0 ? '#ff4444' : '#44ff44';
-    ctx.fillRect(lx - 1, ly - 1, 2, 2);
-  }
+  // Ship status mini-panel
+  ctx.fillStyle = '#0a0a22'; ctx.fillRect(menuX + 4, 22, menuW - 8, 44);
+  ctx.strokeStyle = '#223366'; ctx.strokeRect(menuX + 4, 22, menuW - 8, 44);
+  // Mini ship
+  ctx.save(); ctx.translate(menuX + 28, 44); ctx.scale(0.5, 0.5);
+  SHIP_TYPES.player.draw({ flash: 0, thrusting: false, def: SHIP_TYPES.player, shieldTimer: 0 });
+  ctx.restore();
+  // Ship stats
+  ctx.fillStyle = '#6688bb'; ctx.font = '7px monospace';
+  ctx.fillText(`FUEL`, menuX + 52, 32);
+  ctx.fillText(`CREW`, menuX + 52, 42);
+  ctx.fillText(`MODS`, menuX + 52, 52);
+  ctx.fillText(`RU`, menuX + 52, 62);
+  // Fuel bar
+  const fbx = menuX + 80, fbw = menuW - 92;
+  ctx.fillStyle = '#111'; ctx.fillRect(fbx, 26, fbw, 6);
+  ctx.fillStyle = fuel > 50 ? '#22cc44' : '#cc4400';
+  ctx.fillRect(fbx, 26, fbw * Math.min(1, fuel / 200), 6);
+  ctx.fillStyle = '#aaccff'; ctx.font = '7px monospace';
+  ctx.fillText(`${fuel}/200`, fbx + fbw + 2, 32);
+  // Crew bar
+  ctx.fillStyle = '#111'; ctx.fillRect(fbx, 36, fbw, 6);
+  ctx.fillStyle = '#4488ff';
+  ctx.fillRect(fbx, 36, fbw * Math.min(1, crew / maxCrew), 6);
+  ctx.fillText(`${crew}/${maxCrew}`, fbx + fbw + 2, 42);
+  // Module count
+  ctx.fillText(`${modules.length}/${MAX_MODULES}`, fbx, 52);
+  // Minerals
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText(minerals.toString(), fbx, 62);
 
-  // Solar panels
-  ctx.fillStyle = '#334466';
-  ctx.fillRect(cx - 50, cy - 4, 18, 8);
-  ctx.fillRect(cx + 32, cy - 4, 18, 8);
-  // Panel grid lines
-  ctx.strokeStyle = '#4488cc'; ctx.lineWidth = 0.5;
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath(); ctx.moveTo(cx - 50, cy - 2 + i * 3); ctx.lineTo(cx - 32, cy - 2 + i * 3); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx + 32, cy - 2 + i * 3); ctx.lineTo(cx + 50, cy - 2 + i * 3); ctx.stroke();
-  }
-  ctx.lineWidth = 1;
-
-  // Title
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 10px monospace';
-  ctx.fillText('EARTH STARBASE', cx, cy + 36);
-  ctx.fillStyle = '#667788'; ctx.font = '8px monospace';
-  ctx.fillText('Commander Hayes reporting', cx, cy + 46);
-
-  // Menu options
+  // Menu options (SC2 style - centered, highlighted)
   const menuItems = [
-    { label: 'TALK TO COMMANDER HAYES', icon: '>' },
-    { label: `REFUEL (free) [${fuel}/200]`, icon: '>' },
-    { label: `RECRUIT CREW (10 min) [${crew}/${maxCrew}]`, icon: '>' },
-    { label: `INSTALL MODULES [${modules.length}/${MAX_MODULES}]`, icon: '>' },
-    { label: 'DEPART STARBASE', icon: '>' },
+    'TALK TO COMMANDER',
+    `REFUEL STARSHIP [${fuel}/200]`,
+    `RECRUIT CREW (10 RU) [${crew}/${maxCrew}]`,
+    `OUTFIT MODULES [${modules.length}/${MAX_MODULES}]`,
+    'DEPART STARBASE',
   ];
 
+  ctx.textAlign = 'center';
   for (let i = 0; i < menuItems.length; i++) {
-    const my = 140 + i * 16;
+    const my = 80 + i * 18;
     const sel = i === starbaseCursor;
-    ctx.fillStyle = sel ? 'rgba(68,136,255,0.15)' : 'rgba(0,0,20,0.4)';
-    ctx.fillRect(30, my - 6, W - 60, 14);
-    if (sel) { ctx.strokeStyle = '#4488ff'; ctx.strokeRect(30, my - 6, W - 60, 14); }
-    ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = '8px monospace';
-    ctx.fillText((sel ? '> ' : '  ') + menuItems[i].label, W / 2, my + 2);
+    if (sel) {
+      ctx.fillStyle = 'rgba(34,68,170,0.2)';
+      ctx.fillRect(menuX + 4, my - 4, menuW - 8, 16);
+      ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 1;
+      ctx.strokeRect(menuX + 4, my - 4, menuW - 8, 16);
+    }
+    ctx.fillStyle = sel ? '#ffffff' : '#6688aa'; ctx.font = sel ? 'bold 8px monospace' : '8px monospace';
+    ctx.fillText((sel ? '\u25B6 ' : '') + menuItems[i], menuX + menuW / 2, my + 6);
   }
 
-  // Status bar at bottom
-  ctx.fillStyle = 'rgba(0,0,20,0.7)'; ctx.fillRect(0, H - 30, W, 30);
-  ctx.fillStyle = '#4488ff'; ctx.font = '8px monospace';
-  ctx.fillText(`FUEL: ${fuel}`, W / 2 - 100, H - 20);
-  ctx.fillStyle = '#ffcc44';
-  ctx.fillText(`MINERALS: ${minerals}`, W / 2 - 30, H - 20);
-  ctx.fillStyle = '#44ff88';
-  ctx.fillText(`CREW: ${crew}/${maxCrew}`, W / 2 + 50, H - 20);
-  ctx.fillStyle = '#ff8844';
-  ctx.fillText(`SEALS: ${artifacts}/3`, W / 2 - 100, H - 10);
+  // Seals display
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+  ctx.fillText('PRECURSOR SEALS', menuX + menuW / 2, 176);
+  for (let i = 0; i < 3; i++) {
+    const sx = menuX + menuW / 2 - 20 + i * 16;
+    ctx.fillStyle = i < artifacts ? '#ffcc44' : '#222233';
+    ctx.fillRect(sx, 180, 10, 10);
+    ctx.strokeStyle = i < artifacts ? '#ffdd66' : '#333344';
+    ctx.strokeRect(sx, 180, 10, 10);
+    if (i < artifacts) {
+      ctx.fillStyle = '#ffee88'; ctx.fillRect(sx + 3, 183, 4, 4);
+    }
+  }
 
-  // Message from Hayes
+  // Controls help
+  ctx.fillStyle = '#445566'; ctx.font = '7px monospace';
+  ctx.fillText('UP/DOWN select  SPACE choose  Q leave', menuX + menuW / 2, H - 4);
+  ctx.textAlign = 'left';
+
+  // Hayes message overlay (SC2 style - in the text area)
   if (starbaseMsg && starbaseMsgTimer > 0) {
-    ctx.fillStyle = 'rgba(0,0,40,0.9)';
-    ctx.fillRect(10, 100, W - 20, 34);
+    ctx.fillStyle = 'rgba(4,4,30,0.95)';
+    ctx.fillRect(menuX + 2, 72, menuW - 4, 120);
     ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 1;
-    ctx.strokeRect(10, 100, W - 20, 34);
-    ctx.fillStyle = '#88bbff'; ctx.font = '8px monospace';
-    // Wrap hayes message
+    ctx.strokeRect(menuX + 2, 72, menuW - 4, 120);
+    ctx.fillStyle = '#33ff33'; ctx.font = '8px monospace';
     const words = starbaseMsg.split(' ');
-    let line = '', ty = 110;
+    let line = '', ty = 86;
+    const maxChars = Math.floor((menuW - 20) / 5);
     for (const word of words) {
       const test = line + word + ' ';
-      if (test.length > 38) {
-        ctx.fillText(line, W / 2, ty);
-        line = word + ' '; ty += 10;
-      } else {
-        line = test;
-      }
+      if (test.length > maxChars) {
+        ctx.fillText(line, menuX + 8, ty);
+        line = word + ' '; ty += 11;
+      } else { line = test; }
     }
-    ctx.fillText(line, W / 2, ty);
+    ctx.fillText(line, menuX + 8, ty);
   }
-
-  ctx.fillStyle = '#555'; ctx.font = '8px monospace';
-  ctx.fillText('ARROWS select  SPACE choose  Q leave', W / 2, H - 2);
-  ctx.textAlign = 'left';
 }
 
 // ==================== SCREEN: ORBIT ====================
@@ -3593,182 +3727,209 @@ function updateOrbit() {
 
 function drawOrbit() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  drawStarField(currentStarIdx * 100, currentStarIdx * 77, 60);
   const s = starMap[currentStarIdx];
 
-  // Central star - SC2 style with corona
-  // Outer corona
-  ctx.globalAlpha = 0.08;
-  ctx.fillStyle = s.color.glow;
-  ctx.beginPath(); ctx.arc(W/2, H/2, 45, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 0.15;
-  ctx.beginPath(); ctx.arc(W/2, H/2, 35, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 0.25;
-  ctx.beginPath(); ctx.arc(W/2, H/2, 25, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 1;
-  // Star body
-  ctx.fillStyle = s.color.fill;
-  ctx.beginPath(); ctx.arc(W/2, H/2, 16, 0, TAU); ctx.fill();
-  // Bright center
-  ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.5;
-  ctx.beginPath(); ctx.arc(W/2, H/2, 8, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 1;
-  // Solar flares
-  ctx.fillStyle = s.color.glow; ctx.globalAlpha = 0.4;
-  for (let f = 0; f < 4; f++) {
-    const fa = frame * 0.01 + f * 1.5;
-    const fr = 18 + Math.sin(frame * 0.05 + f * 2) * 4;
-    ctx.beginPath(); ctx.arc(W/2 + Math.cos(fa) * fr, H/2 + Math.sin(fa) * fr, 4, 0, TAU); ctx.fill();
+  // === SC2 Solar System View ===
+  // Deeper starfield
+  for (let i = 0; i < 60; i++) {
+    const sx = (i * 137.5 + currentStarIdx * 50) % W;
+    const sy = (i * 91.3 + currentStarIdx * 30) % H;
+    ctx.fillStyle = i % 5 === 0 ? '#aaccff' : '#666';
+    ctx.globalAlpha = 0.3 + (i % 3) * 0.15;
+    ctx.fillRect(sx, sy, 1, 1);
   }
   ctx.globalAlpha = 1;
 
-  // Planets orbiting
+  // Central star with proper corona (SC2 had beautiful star rendering)
+  const starX = W * 0.35, starY = H * 0.45;
+  // Multi-layered corona
+  ctx.globalAlpha = 0.04; ctx.fillStyle = s.color.glow;
+  ctx.beginPath(); ctx.arc(starX, starY, 55, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.08;
+  ctx.beginPath(); ctx.arc(starX, starY, 42, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.15;
+  ctx.beginPath(); ctx.arc(starX, starY, 30, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.3;
+  ctx.beginPath(); ctx.arc(starX, starY, 22, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Star body
+  ctx.fillStyle = s.color.fill;
+  ctx.beginPath(); ctx.arc(starX, starY, 16, 0, TAU); ctx.fill();
+  // Bright center
+  ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.arc(starX, starY, 8, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Solar flares
+  ctx.fillStyle = s.color.glow; ctx.globalAlpha = 0.3;
+  for (let f = 0; f < 5; f++) {
+    const fa = frame * 0.008 + f * 1.3;
+    const fr = 18 + Math.sin(frame * 0.04 + f * 2) * 5;
+    ctx.beginPath(); ctx.arc(starX + Math.cos(fa) * fr, starY + Math.sin(fa) * fr, 3 + Math.sin(frame * 0.06 + f) * 2, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Planets orbiting (SC2 style - elliptical orbits, good spacing)
   for (let i = 0; i < s.planets.length; i++) {
     const p = s.planets[i];
-    const orbitR = 40 + i * Math.min(28, 180 / s.planets.length);
-    const angle = frame * 0.005 * (1 + i * 0.3) + i * 2;
-    const px = W/2 + Math.cos(angle) * orbitR;
-    const py = H/2 + Math.sin(angle) * orbitR * 0.5;
+    const orbitR = 50 + i * Math.min(24, 160 / s.planets.length);
+    const angle = frame * 0.004 * (1 + i * 0.25) + i * 2.1;
+    const px = starX + Math.cos(angle) * orbitR;
+    const py = starY + Math.sin(angle) * orbitR * 0.4;
 
-    // Orbit line
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.ellipse(W/2, H/2, orbitR, orbitR * 0.5, 0, 0, TAU); ctx.stroke();
+    // Orbit line (subtle dotted feel)
+    ctx.strokeStyle = 'rgba(60,80,120,0.15)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(starX, starY, orbitR, orbitR * 0.4, 0, 0, TAU); ctx.stroke();
 
-    // Planet - SC2 style with surface detail
     const sel = i === orbitCursor;
     const baseR = (p.radius || 10) * 0.5;
     const r = sel ? baseR + 2 : baseR;
-    // Atmosphere glow
+
+    // Selection glow
     if (sel) {
-      ctx.globalAlpha = 0.15; ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(px, py, r + 4, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 0.2; ctx.fillStyle = '#4488ff';
+      ctx.beginPath(); ctx.arc(px, py, r + 6, 0, TAU); ctx.fill();
       ctx.globalAlpha = 1;
     }
     // Planet body
     ctx.fillStyle = p.color;
     ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill();
-    // Surface features (craters/continents)
+    // Surface detail
     ctx.save(); ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.clip();
     const pRot = frame * 0.006 + i * 3;
-    ctx.globalAlpha = 0.3;
+    ctx.globalAlpha = 0.25;
     ctx.fillStyle = '#fff';
     ctx.beginPath(); ctx.arc(px + Math.cos(pRot) * r * 0.4, py - r * 0.3, r * 0.3, 0, TAU); ctx.fill();
     ctx.fillStyle = '#000';
     ctx.beginPath(); ctx.arc(px + Math.cos(pRot + 1.5) * r * 0.3, py + r * 0.2, r * 0.25, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(px + Math.cos(pRot + 3) * r * 0.5, py - r * 0.1, r * 0.2, 0, TAU); ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.restore();
-    // Shadow gradient
-    ctx.globalAlpha = 0.3; ctx.fillStyle = '#000';
+    ctx.globalAlpha = 1; ctx.restore();
+    // Shadow
+    ctx.globalAlpha = 0.35; ctx.fillStyle = '#000';
     ctx.beginPath(); ctx.arc(px + r * 0.3, py + r * 0.3, r, 0, TAU); ctx.fill();
-    ctx.globalAlpha = 1;
-    // Specular
-    ctx.globalAlpha = 0.25; ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(px - r * 0.3, py - r * 0.3, r * 0.3, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.2; ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px - r * 0.25, py - r * 0.25, r * 0.3, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
 
     if (sel) {
       ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(px, py, r + 4, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px, py, r + 5, 0, TAU); ctx.stroke();
     }
 
-    // Planet label
-    ctx.fillStyle = sel ? '#fff' : '#888'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(p.name, px, py + r + 8);
-    if (p.scanned) {
-      ctx.fillStyle = '#44ff44'; ctx.fillText('SCANNED', px, py + r + 14);
-    }
+    // Planet number (SC2 showed roman numerals)
+    ctx.fillStyle = sel ? '#fff' : '#556677'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+    const numerals = ['I','II','III','IV','V','VI','VII','VIII','IX'];
+    ctx.fillText(numerals[i] || (i + 1).toString(), px, py + r + 8);
     ctx.textAlign = 'left';
   }
 
-  // Scan progress bar
-  if (scanTimer > 0) {
-    const p = s.planets[orbitCursor];
-    if (!p.scanned) {
-      ctx.fillStyle = '#222'; ctx.fillRect(W/2 - 30, H - 40, 60, 6);
-      ctx.fillStyle = '#44aaff'; ctx.fillRect(W/2 - 30, H - 40, 60 * (scanTimer / 40), 6);
-      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('SCANNING...', W/2, H - 44);
-      ctx.textAlign = 'left';
-    }
-  }
-
-  // SC2-style planet scan panel (right side)
+  // === SC2 Planet Scan Panel (right side, taller) ===
   const p = s.planets[orbitCursor];
-  const panX = W - 105, panY = 4, panW2 = 101, panH2 = 120;
-  ctx.fillStyle = 'rgba(0,0,20,0.85)'; ctx.fillRect(panX, panY, panW2, panH2);
-  ctx.strokeStyle = '#336'; ctx.lineWidth = 1; ctx.strokeRect(panX, panY, panW2, panH2);
-  // Planet close-up (big rotating planet)
-  const ppx = panX + 50, ppy = panY + 38, ppr = 28;
+  const panX = W - 115, panY = 2, panW2 = 113, panH2 = H - 18;
+  ctx.fillStyle = '#04041a'; ctx.fillRect(panX, panY, panW2, panH2);
+  ctx.strokeStyle = '#223366'; ctx.lineWidth = 1; ctx.strokeRect(panX, panY, panW2, panH2);
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(panX, panY, panW2, 2);
+
+  // Planet close-up (large rotating planet)
+  const ppx = panX + panW2/2, ppy = panY + 50, ppr = 36;
+  // Atmosphere
+  ctx.globalAlpha = 0.1; ctx.fillStyle = p.color;
+  ctx.beginPath(); ctx.arc(ppx, ppy, ppr + 4, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
   ctx.fillStyle = p.color;
   ctx.beginPath(); ctx.arc(ppx, ppy, ppr, 0, TAU); ctx.fill();
-  // Rotating surface
+  // Rotating surface features
   ctx.save(); ctx.beginPath(); ctx.arc(ppx, ppy, ppr, 0, TAU); ctx.clip();
-  const pRot2 = frame * 0.01;
-  for (let ci = 0; ci < 5; ci++) {
-    const ca = pRot2 + ci * 1.3;
-    const cx2 = ppx + Math.cos(ca) * ppr * 0.5;
-    const cy2 = ppy + Math.sin(ci * 2) * ppr * 0.3;
-    ctx.globalAlpha = 0.3;
+  const pRot2 = frame * 0.008;
+  for (let ci = 0; ci < 6; ci++) {
+    const ca = pRot2 + ci * 1.1;
+    ctx.globalAlpha = 0.25;
     ctx.fillStyle = ci % 2 ? '#fff' : '#000';
-    ctx.beginPath(); ctx.arc(cx2, cy2, ppr * 0.2 + ci * 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(ppx + Math.cos(ca) * ppr * 0.4, ppy + Math.sin(ci * 1.5) * ppr * 0.3, ppr * 0.15 + ci * 2, 0, TAU); ctx.fill();
   }
   ctx.globalAlpha = 1; ctx.restore();
   // Shadow
-  ctx.globalAlpha = 0.35; ctx.fillStyle = '#000';
-  ctx.beginPath(); ctx.arc(ppx + 8, ppy + 6, ppr, 0, TAU); ctx.fill();
-  ctx.globalAlpha = 0.2; ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(ppx - 8, ppy - 8, ppr * 0.35, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.4; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(ppx + 10, ppy + 8, ppr, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.15; ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(ppx - 10, ppy - 10, ppr * 0.3, 0, TAU); ctx.fill();
   ctx.globalAlpha = 1;
-  // Scan data text
+
+  // Scan data (SC2 style readout)
+  ctx.fillStyle = '#223366'; ctx.fillRect(panX + 4, ppy + ppr + 6, panW2 - 8, 1);
   ctx.fillStyle = '#4488ff'; ctx.font = 'bold 8px monospace';
-  ctx.fillText(p.name, panX + 4, panY + 74);
-  ctx.fillStyle = '#8888aa'; ctx.font = '8px monospace';
-  ctx.fillText(p.type || 'Unknown', panX + 4, panY + 83);
-  if (p.scanned) {
-    ctx.fillStyle = '#44ff44'; ctx.fillText('COLLECTED', panX + 4, panY + 93);
+  ctx.fillText(p.name, panX + 6, ppy + ppr + 18);
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+  ctx.fillText('Type:', panX + 6, ppy + ppr + 30);
+  ctx.fillStyle = '#aaccff'; ctx.fillText(p.type || 'Unknown', panX + 40, ppy + ppr + 30);
+  // SC2-style data bars
+  ctx.fillStyle = '#6688aa'; ctx.fillText('Minerals:', panX + 6, ppy + ppr + 42);
+  if (!p.scanned) {
+    // Mineral bar
+    ctx.fillStyle = '#111'; ctx.fillRect(panX + 54, ppy + ppr + 36, 50, 5);
+    ctx.fillStyle = '#ffcc44'; ctx.fillRect(panX + 54, ppy + ppr + 36, Math.min(50, p.minerals * 2), 5);
+    ctx.fillStyle = '#aaccff'; ctx.fillText(p.minerals.toString(), panX + 54 + 52, ppy + ppr + 42);
+    ctx.fillStyle = '#6688aa'; ctx.fillText('Fuel:', panX + 6, ppy + ppr + 54);
+    ctx.fillStyle = '#111'; ctx.fillRect(panX + 54, ppy + ppr + 48, 50, 5);
+    ctx.fillStyle = '#44ccff'; ctx.fillRect(panX + 54, ppy + ppr + 48, Math.min(50, p.fuel * 3), 5);
+    ctx.fillStyle = '#aaccff'; ctx.fillText(p.fuel.toString(), panX + 54 + 52, ppy + ppr + 54);
   } else {
-    ctx.fillStyle = '#ffcc44';
-    ctx.fillText(`Minerals: ${p.minerals}`, panX + 4, panY + 93);
-    ctx.fillText(`Fuel: ${p.fuel}`, panX + 4, panY + 103);
-    ctx.fillStyle = '#88aaff';
-    ctx.fillText('SPACE to scan', panX + 4, panY + 114);
+    ctx.fillStyle = '#44ff44'; ctx.font = 'bold 8px monospace';
+    ctx.fillText('COLLECTED', panX + 6, ppy + ppr + 42);
   }
 
-  // Star info panel (left side)
-  ctx.fillStyle = 'rgba(0,0,20,0.7)'; ctx.fillRect(4, 4, 80, 30);
-  ctx.strokeStyle = '#336'; ctx.strokeRect(4, 4, 80, 30);
+  // Scan button prompt
+  if (!p.scanned) {
+    ctx.fillStyle = '#223366'; ctx.fillRect(panX + 4, panH2 - 20, panW2 - 8, 16);
+    ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#88ccff' : '#4488cc'; ctx.font = 'bold 8px monospace';
+    ctx.fillText('HOLD SPACE', panX + 14, panH2 - 8);
+  }
+
+  // Scan progress
+  if (scanTimer > 0 && !p.scanned) {
+    ctx.fillStyle = '#111'; ctx.fillRect(panX + 4, panH2 - 34, panW2 - 8, 8);
+    ctx.fillStyle = '#44aaff'; ctx.fillRect(panX + 4, panH2 - 34, (panW2 - 8) * (scanTimer / 40), 8);
+    ctx.fillStyle = '#88ddff'; ctx.fillRect(panX + 4, panH2 - 34, (panW2 - 8) * (scanTimer / 40), 3);
+    ctx.fillStyle = '#aaccff'; ctx.font = '7px monospace';
+    ctx.fillText('SCANNING...', panX + 20, panH2 - 38);
+  }
+
+  // === Star info (top-left, SC2 style) ===
+  ctx.fillStyle = '#04041a'; ctx.fillRect(2, 2, 90, 36);
+  ctx.strokeStyle = '#223366'; ctx.strokeRect(2, 2, 90, 36);
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(2, 2, 90, 2);
   ctx.fillStyle = s.color.fill; ctx.font = 'bold 8px monospace';
-  ctx.fillText(s.name, 8, 14);
-  ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
-  ctx.fillText(`${s.planets.length} planet${s.planets.length > 1 ? 's' : ''}`, 8, 26);
+  ctx.fillText(s.name, 6, 14);
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+  ctx.fillText(`${s.planets.length} planet${s.planets.length > 1 ? 's' : ''}`, 6, 24);
+  ctx.fillText(`Planet ${orbitCursor + 1}/${s.planets.length}`, 6, 34);
 
   // Artifact indicator
   if (s.artifact) {
-    ctx.fillStyle = '#ff8844'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#04041a'; ctx.fillRect(2, 40, 90, 18);
+    ctx.strokeStyle = '#ffaa22'; ctx.strokeRect(2, 40, 90, 18);
+    ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 7px monospace';
     if (s.alien && !defeatedAliens.has(currentStarIdx)) {
-      ctx.fillText('PRECURSOR SEAL - Defeat guardian first!', W/2, 20);
+      ctx.fillText('SEAL GUARDED', 6, 52);
     } else {
-      ctx.fillText('PRECURSOR SEAL! Press C to collect!', W/2, 20);
+      ctx.fillText('SEAL! Press C', 6, 52);
     }
-    ctx.textAlign = 'left';
   }
 
-  // HUD bar
-  ctx.fillStyle = 'rgba(0,0,20,0.7)'; ctx.fillRect(0, H - 14, W, 14);
-  ctx.fillStyle = '#4488ff'; ctx.font = '8px monospace';
+  // Bottom HUD bar (SC2 style)
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, H - 16, W, 16);
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(0, H - 16, W, 1);
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
   ctx.fillText(`FUEL:${fuel}`, 4, H - 4);
-  ctx.fillStyle = '#ffcc44'; ctx.fillText(`MIN:${minerals}`, 55, H - 4);
-  ctx.fillStyle = '#44ff88'; ctx.fillText(`CREW:${crew}`, 110, H - 4);
-  ctx.fillStyle = '#555'; ctx.textAlign = 'right';
-  ctx.fillText('LEFT/RIGHT planets  SPACE scan  Q back', W - 4, H - 4);
+  ctx.fillStyle = '#ffcc44'; ctx.fillText(`RU:${minerals}`, 55, H - 4);
+  ctx.fillStyle = '#44cc88'; ctx.fillText(`CREW:${crew}`, 100, H - 4);
+  ctx.fillStyle = '#445566'; ctx.textAlign = 'right'; ctx.font = '7px monospace';
+  ctx.fillText('LEFT/RIGHT  SPACE scan  Q back', W - 4, H - 4);
   ctx.textAlign = 'left';
 
   // Message
   if (messageTimer > 0) {
     messageTimer--;
-    ctx.fillStyle = '#ffcc44'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(gameMessage, W/2, H/2 + 60);
+    ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(gameMessage, starX, H/2 + 70);
     ctx.textAlign = 'left';
   }
 }
@@ -4316,17 +4477,38 @@ function drawCombat() {
 
 // ==================== SCREEN: GAME OVER ====================
 function drawGameOver() {
-  ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, W, H);
-  drawStarField(0, 0, 30);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // Red-tinted debris field
+  for (let i = 0; i < 40; i++) {
+    const dx = (i * 97.3 + frame * 0.2) % W;
+    const dy = (i * 61.7 + frame * 0.1) % H;
+    ctx.globalAlpha = 0.2 + Math.sin(frame * 0.02 + i) * 0.1;
+    ctx.fillStyle = i % 3 === 0 ? '#441111' : i % 3 === 1 ? '#ff4422' : '#882211';
+    ctx.fillRect(dx, dy, 1 + (i % 3), 1);
+  }
+  ctx.globalAlpha = 1;
+  // Explosion remnant
+  const exR = 30 + Math.sin(frame * 0.03) * 5;
+  ctx.globalAlpha = 0.08; ctx.fillStyle = '#ff2200';
+  ctx.beginPath(); ctx.arc(W/2, H/2 - 30, exR + 20, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.15; ctx.fillStyle = '#ff4400';
+  ctx.beginPath(); ctx.arc(W/2, H/2 - 30, exR, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ff4444'; ctx.font = 'bold 18px monospace';
-  ctx.fillText('GAME OVER', W/2, H/2 - 20);
-  ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+  // Red border box (SC2 style)
+  ctx.fillStyle = 'rgba(20,0,0,0.8)'; ctx.fillRect(W/2 - 120, H/2 - 45, 240, 90);
+  ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 2; ctx.strokeRect(W/2 - 120, H/2 - 45, 240, 90);
+  ctx.strokeStyle = '#660000'; ctx.lineWidth = 1; ctx.strokeRect(W/2 - 118, H/2 - 43, 236, 86);
+  // Text
+  ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px monospace';
+  ctx.fillText('GAME OVER', W/2, H/2 - 18);
+  ctx.fillStyle = '#cc8888'; ctx.font = '8px monospace';
   ctx.fillText('The Vindicator is lost.', W/2, H/2);
-  ctx.fillText('The rift grows wider...', W/2, H/2 + 12);
-  ctx.fillText(`Precursor Artifacts: ${artifacts}/3`, W/2, H/2 + 24);
-  ctx.fillStyle = '#fff'; ctx.font = '8px monospace';
-  if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY TO RESTART', W/2, H/2 + 40);
+  ctx.fillText('The dimensional rift grows wider...', W/2, H/2 + 12);
+  ctx.fillStyle = '#ffcc44'; ctx.fillText(`Precursor Seals: ${artifacts}/3`, W/2, H/2 + 28);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace';
+  if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY', W/2, H/2 + 55);
   ctx.textAlign = 'left';
   for (const k in justPressed) {
     if (justPressed[k]) { state = 'title'; break; }
@@ -4336,36 +4518,75 @@ function drawGameOver() {
 // ==================== SCREEN: VICTORY ====================
 function drawVictory() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  drawStarField(frame, frame * 0.5, 100);
+
+  // Stars scrolling upward (SC2 ending scroll)
+  for (let i = 0; i < 80; i++) {
+    const sx = (i * 137.5) % W;
+    const sy = ((i * 91.3 - frame * 0.3) % H + H) % H;
+    ctx.globalAlpha = 0.4 + Math.sin(frame * 0.01 + i) * 0.2;
+    ctx.fillStyle = i % 4 === 0 ? '#ffcc88' : '#aaccff';
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+  ctx.globalAlpha = 1;
 
   // Fireworks
-  if (Math.random() < 0.1) {
-    const fx = Math.random() * W, fy = Math.random() * H * 0.6;
-    const colors = ['#ff4444','#44ff44','#4444ff','#ffff44','#ff44ff','#44ffff'];
-    spawnParticles(fx + mapCamX, fy + mapCamY, colors[Math.floor(Math.random()*colors.length)], 12, 4);
+  if (Math.random() < 0.12) {
+    const fx = Math.random() * W, fy = Math.random() * H * 0.5;
+    const colors = ['#ff4444','#44ff44','#4488ff','#ffff44','#ff44ff','#44ffff','#ffaa44'];
+    spawnParticles(fx + (mapCamX || 0), fy + (mapCamY || 0), colors[Math.floor(Math.random()*colors.length)], 15, 5);
   }
   for (const p of particles) p.update();
   particles = particles.filter(p => p.life > 0);
   for (const p of particles) p.draw(mapCamX || 0, mapCamY || 0);
 
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 20px monospace';
-  ctx.fillText('VICTORY', W/2, H/2 - 50);
-  ctx.fillStyle = '#88bbff'; ctx.font = '8px monospace';
-  ctx.fillText('The dimensional rift is sealed!', W/2, H/2 - 32);
-  ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
-  ctx.fillText('With the three Precursor Artifacts,', W/2, H/2 - 16);
-  ctx.fillText('you closed the rift torn open by', W/2, H/2 - 4);
-  ctx.fillText('the Sa-Matra\'s destruction.', W/2, H/2 + 8);
-  ctx.fillStyle = '#88aacc';
-  ctx.fillText('The Orz are pushed back', W/2, H/2 + 24);
-  ctx.fillText('to the space *between* spaces.', W/2, H/2 + 34);
-  ctx.fillStyle = '#aaa';
-  ctx.fillText('The Alliance of Free Stars endures.', W/2, H/2 + 50);
-  ctx.fillStyle = '#667788';
-  ctx.fillText('But the Orz are still smiling...', W/2, H/2 + 64);
-  ctx.fillStyle = '#fff'; ctx.font = '8px monospace';
-  if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY', W/2, H/2 + 55);
+
+  // Gold border victory box (SC2 ending style)
+  ctx.fillStyle = 'rgba(10,8,0,0.85)'; ctx.fillRect(W/2 - 140, 20, 280, H - 40);
+  ctx.strokeStyle = '#ddaa22'; ctx.lineWidth = 2; ctx.strokeRect(W/2 - 140, 20, 280, H - 40);
+  ctx.strokeStyle = '#886611'; ctx.lineWidth = 1; ctx.strokeRect(W/2 - 138, 22, 276, H - 44);
+  // Gold divider lines
+  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 130, 48, 260, 1);
+  ctx.fillStyle = '#886611'; ctx.fillRect(W/2 - 130, 49, 260, 1);
+
+  // Title
+  ctx.fillStyle = '#886611'; ctx.font = 'bold 22px monospace';
+  ctx.fillText('VICTORY', W/2 + 1, 42 + 1);
+  ctx.fillStyle = '#ffdd44'; ctx.font = 'bold 22px monospace';
+  ctx.fillText('VICTORY', W/2, 42);
+
+  // Story text (SC2 ending scroll style)
+  ctx.fillStyle = '#88bbff'; ctx.font = '9px monospace';
+  ctx.fillText('The dimensional rift is sealed!', W/2, 68);
+  ctx.fillStyle = '#ccddee'; ctx.font = '8px monospace';
+  ctx.fillText('With the three Precursor Seals,', W/2, 88);
+  ctx.fillText('you closed the rift torn open', W/2, 100);
+  ctx.fillText('by the Sa-Matra\'s destruction.', W/2, 112);
+
+  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, 122, 120, 1);
+
+  ctx.fillStyle = '#88aacc'; ctx.font = '8px monospace';
+  ctx.fillText('The Orz are pushed back', W/2, 138);
+  ctx.fillText('to the space *between* spaces.', W/2, 150);
+  ctx.fillText('Their *fingers* no longer', W/2, 162);
+  ctx.fillText('reach into our dimension.', W/2, 174);
+
+  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, 184, 120, 1);
+
+  ctx.fillStyle = '#aaccdd'; ctx.font = '8px monospace';
+  ctx.fillText('The Alliance of Free Stars', W/2, 200);
+  ctx.fillText('endures. Humanity, Chmmr,', W/2, 212);
+  ctx.fillText('Yehat, and Syreen stand', W/2, 224);
+  ctx.fillText('united among the stars.', W/2, 236);
+
+  ctx.fillStyle = '#667788'; ctx.font = '8px monospace';
+  ctx.fillText('But somewhere in the void,', W/2, 260);
+  ctx.fillStyle = '#44aa88';
+  ctx.fillText('the Orz are still *smiling*...', W/2, 272);
+
+  // Blinking prompt
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace';
+  if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY', W/2, H - 28);
   ctx.textAlign = 'left';
   for (const k in justPressed) {
     if (justPressed[k]) { state = 'title'; break; }
