@@ -224,6 +224,7 @@ let state = 'title';
 let frame = 0;
 let playerShip, enemyShip;
 let projectiles, particles, combatPlanet;
+let combatEnemy; // race key of the enemy for fleet select
 let starMap, nearestStar, selectedStar;
 let mapCamX, mapCamY;
 let dialogue, dialogueChoice;
@@ -251,6 +252,32 @@ const MODULE_DEFS = [
 let visitedStars;
 let defeatedAliens;
 let currentStarIdx;
+
+// Fleet system (SC2 — you collect allied ships)
+let fleet; // array of ship type keys e.g. ['player', 'spathi', 'pkunk']
+let fleetCursor;
+
+// Planet lander state (SC2's surface exploration mini-game)
+let landerX, landerY, landerVX, landerVY, landerAngle, landerFuel;
+let landerCargo, landerMaxCargo, landerHP, landerMaxHP;
+let surfaceDeposits; // array of {x, y, type, collected}
+let surfaceHazards; // array of {x, y, type, timer}
+let surfaceBio; // array of {x, y, type, alive, vx, vy}
+let surfaceWidth, surfaceHeight;
+let surfaceTerrain; // height map array
+let currentPlanetIdx;
+
+// SC2 mineral types with values
+const MINERAL_TYPES = [
+  { name: 'Common', color: '#888888', value: 1 },
+  { name: 'Corrosive', color: '#44cc44', value: 2 },
+  { name: 'Base Metal', color: '#6688aa', value: 3 },
+  { name: 'Noble Gas', color: '#cc44cc', value: 4 },
+  { name: 'Rare Earth', color: '#ff8844', value: 5 },
+  { name: 'Precious', color: '#ffcc44', value: 6 },
+  { name: 'Radioactive', color: '#44ff44', value: 8 },
+  { name: 'Exotic', color: '#ff44ff', value: 25 },
+];
 
 // ==================== UTILITY ====================
 function dist(x1, y1, x2, y2) { return Math.sqrt((x2-x1)**2 + (y2-y1)**2); }
@@ -1708,15 +1735,40 @@ function generateStarMap() {
     for (let j = 0; j < count; j++) {
       const pt = planetTypes[Math.floor(Math.random() * planetTypes.length)];
       const pColor = pt.colors[Math.floor(Math.random() * pt.colors.length)];
-      const mineralMult = pt.type === 'Gas Giant' ? 0.3 : (pt.type === 'Volcanic' ? 2.0 : pt.type === 'Rocky' ? 1.5 : 1.0);
-      const fuelMult = pt.type === 'Gas Giant' ? 2.5 : (pt.type === 'Ice' ? 0.5 : 1.0);
+      const isGas = pt.type === 'Gas Giant';
+      // SC2: each planet has mineral deposits on its surface
+      const depositCount = isGas ? 0 : Math.floor(5 + Math.random() * 15);
+      const deposits = [];
+      // Richer planets get rarer minerals
+      const richness = pt.type === 'Volcanic' ? 3 : pt.type === 'Rocky' ? 2 : pt.type === 'Desert' ? 1.5 : 1;
+      for (let d = 0; d < depositCount; d++) {
+        // Weighted mineral type based on richness
+        let typeIdx = Math.floor(Math.random() * Math.min(MINERAL_TYPES.length, 3 + richness * 2));
+        // Rare chance for exotic
+        if (Math.random() < 0.02 * richness) typeIdx = 7;
+        deposits.push({
+          x: Math.random() * 600 + 20,
+          y: 0, // set during lander init based on terrain
+          type: typeIdx, collected: false,
+        });
+      }
+      // Hazard level based on planet type
+      const hazard = pt.type === 'Volcanic' ? 3 : pt.type === 'Toxic' ? 2 :
+        pt.type === 'Desert' ? 1 : pt.type === 'Ice' ? 1 : 0;
+      // Bio life
+      const bioCount = pt.type === 'Jungle' ? Math.floor(3 + Math.random() * 5) :
+        pt.type === 'Water' ? Math.floor(2 + Math.random() * 3) :
+        pt.type === 'Toxic' ? Math.floor(1 + Math.random() * 2) : 0;
       plnts.push({
         name: `${starName} ${romanNums[j]}`,
-        type: pt.type,
-        minerals: Math.floor((10 + Math.random() * 40) * mineralMult),
-        fuel: Math.floor((5 + Math.random() * 25) * fuelMult),
-        scanned: false, color: pColor,
+        type: pt.type, color: pColor,
         radius: pt.minR + Math.floor(Math.random() * (pt.maxR - pt.minR)),
+        landable: !isGas,
+        deposits: deposits,
+        hazard: hazard,
+        bioCount: bioCount,
+        scanned: false,
+        totalValue: deposits.reduce((s, d) => s + MINERAL_TYPES[d.type].value, 0),
       });
     }
     return plnts;
@@ -1787,7 +1839,7 @@ const DIALOGUES = {
     choices: [
       { text: 'Relax! Can you help repair our ship?', response: 'Oh! Oh yes! We are VERY good at fixing things! Mostly our own ship after running away. +10 crew!', action: 'heal' },
       { text: 'We need HyperSpace fuel.', response: 'Fuel? YES! Take it! Take 30 units! Just please do not shoot at us! We bruise VERY easily!', action: 'fuel' },
-      { text: 'Have you seen anything strange lately?', response: 'STRANGE?! Everything is strange and TERRIFYING! There are things coming through from *below*! Like the Orz but WORSE! Find the three Precursor Seals before they get here! We are going to HIDE now!', action: 'info' },
+      { text: 'Will you join our fleet?', response: 'Join your FLEET?! That means going INTO DANGER! On PURPOSE! Every fiber of my being screams NO but... fine! ONE Eluder. Just ONE! Please do not fly near anything scary!', action: 'ally' },
     ],
   },
   chmmr: {
@@ -1797,7 +1849,7 @@ const DIALOGUES = {
     hostile: 'We did not survive Ur-Quan enslavement to be threatened by you.',
     choices: [
       { text: 'Tell me about the Precursor Seals.', response: 'The Precursors understood dimensional boundaries. They forged three Seals to reinforce the barriers. When the Sa-Matra detonated, it shattered those barriers. The Seals are scattered across the galaxy.', action: 'info' },
-      { text: 'We need minerals for the Vindicator.', response: 'Our crystalline matrix naturally sheds useful compounds. Take what you need. +30 minerals.', action: 'minerals' },
+      { text: 'Will you join the Alliance fleet?', response: 'The Chenjesu and Mmrnmhrm, now unified as Chmmr, are ready. We will send an Avatar to join your fleet. Together we will seal the rift.', action: 'ally' },
       { text: 'Test the Vindicator in combat!', response: 'The Chmmr Avatar is formidable. Very well. Let us see if your Precursor ship is worthy.', action: 'fight' },
     ],
   },
@@ -1842,7 +1894,7 @@ const DIALOGUES = {
     choices: [
       { text: 'Can you heal our crew?', response: 'Oh YES! Let me channel the cosmic healing energies! The great bird spirit flows through me! +10 crew! Namaste!', action: 'heal' },
       { text: 'Do you have fuel to share?', response: 'Fuel? Material concerns! But yes, we understand you need it to save the galaxy. Take 30 units! The universe provides!', action: 'fuel' },
-      { text: 'What do your visions show?', response: 'I see... a GREAT DARKNESS from *below*! The Orz are merely the first ripple! The three Precursor Seals must be found or all will be *dissolved*! Also, you should drink more water.', action: 'info' },
+      { text: 'Will you join our fleet?', response: 'JOIN you?! Oh YES! The cosmic spirits have been telling me this day would come! A Fury will accompany you! And if we die, we shall be REBORN! Probably! The spirits are vague on the details!', action: 'ally' },
     ],
   },
   melnorme: {
@@ -1875,7 +1927,7 @@ const DIALOGUES = {
     choices: [
       { text: 'How goes the civil war?', response: 'The Royalist Clans still support the cowardly Queen who surrendered to the Ur-Quan. But the Rebel Clans fight on! We would welcome your help. Take 20 fuel as a gift between warriors!', action: 'fuel' },
       { text: 'Test my combat skills, Yehat!', response: 'HRAAAK! Now you speak the language of the Yehat! Let our Terminators clash! If you win, you earn the respect of ALL the Clans!', action: 'spar' },
-      { text: 'Have you heard of dimensional rifts?', response: 'Our scouts report strange... openings in space near the Orz territories. Things come through. Things that should not exist. The Pkunk babble about cosmic balance. For once, the feathered fools may be right.', action: 'info' },
+      { text: 'Will you join our fleet?', response: 'HA! A warrior asks! The Rebel Yehat clans will send a Terminator to fight by your side! For honor! For the TRUE Queen! SHREEEEE!', action: 'ally' },
     ],
   },
   supox: {
@@ -1886,7 +1938,7 @@ const DIALOGUES = {
     choices: [
       { text: 'Your world is beautiful. Can we trade?', response: 'Of course! We have little need for minerals - we photosynthesize! Give us 10 minerals and we shall share 25 units of bio-fuel, refined from our own photosynthetic reserves!', action: 'swtrade', cost: 10, give: 25 },
       { text: 'How are the Utwig doing?', response: 'Oh, our dear friends the Utwig! They are still SO sad about their broken Ultron. They wear their Masks of Ultimate Despair constantly now. If only someone could repair it... perhaps with Precursor technology?', action: 'info' },
-      { text: 'Can you heal our crew?', response: 'Yes! Our botanical medicines can mend almost any wound. Let our spores work their gentle magic. +10 crew restored to health!', action: 'heal' },
+      { text: 'Will you join our fleet?', response: 'We would be honored! The Supox Blade will accompany you. Our photosynthetic hull requires no fuel! Well, almost no fuel. Some fuel. Please have fuel.', action: 'ally' },
     ],
   },
   utwig: {
@@ -1975,6 +2027,7 @@ const DIALOGUES = {
       { text: 'How are your people recovering?', response: 'We found a new homeworld, thanks to your alliance. The wound of Syra\'s destruction still aches, but we heal. The Mycon will answer for their crimes someday. Take these minerals - we have been mining well. +30 minerals.', action: 'minerals' },
       { text: 'Will you help us close the rift?', response: 'The Syreen stand with the Alliance, Captain. We have heard of the Precursor Seals. Our scouts report Arilou activity near the rift. They may know more. Take crew volunteers for your mission. +10 crew!', action: 'heal' },
       { text: 'Spar with us for practice!', response: 'A friendly contest? The Syreen enjoy a good challenge. But be warned, Captain - our Siren Song has turned many a battle. Try not to be too... distracted.', action: 'spar' },
+      { text: 'Will you join our fleet?', response: 'Captain... I thought you would never ask. A Penetrator will join your fleet. Our Siren Song will turn enemy crews to your side. I look forward to... working closely with you.', action: 'ally' },
     ],
   },
   shofixti: {
@@ -1986,6 +2039,7 @@ const DIALOGUES = {
       { text: 'Your sacrifice was legendary!', response: 'KYAII! Yes! When the Ur-Quan Dreadnought came, we flew into our own SUN and made it go BOOM! Most honorable death! But somehow I survived! Now I seek more GLORY! Take 20 fuel for your quest, honorable Captain!', action: 'fuel' },
       { text: 'Can you join our crew?', response: 'JOIN?! Shofixti Scout is TINY but FAST! We cannot fit on your big ship, but we give you crew volunteers! Five brave Shofixti warriors! They know the Glory Device technique! +5 crew!', action: 'heal' },
       { text: 'Show me your fighting spirit!', response: 'KYAIIII!! You want to see Shofixti POWER?! Our Scout is small but our HEART is HUGE! Warning: if things look bad, I WILL use the Glory Device! Death before dishonor! KYAII!', action: 'spar' },
+      { text: 'Will you join our fleet?', response: 'KYAIII!! You want Shofixti Scout in your FLEET?! This is GREATEST HONOR! I will fly with you! And if we face impossible odds, remember - the Glory Device is always an option! DEATH OR GLORY! Preferably glory!', action: 'ally' },
     ],
   },
 };
@@ -1994,6 +2048,8 @@ const DIALOGUES = {
 function initGame() {
   fuel = 100; minerals = 50; crew = 20; maxCrew = 20;
   artifacts = 0; modules = [];
+  fleet = ['player']; // Start with just your flagship
+  fleetCursor = 0;
   visitedStars = new Set([0]);
   defeatedAliens = new Set();
   currentStarIdx = 0;
@@ -3685,26 +3741,30 @@ let scanTimer = 0;
 
 function updateOrbit() {
   const s = starMap[currentStarIdx];
-  if (justPressed['ArrowLeft'] || justPressed['KeyA']) { orbitCursor = (orbitCursor - 1 + s.planets.length) % s.planets.length; sfx.select(); }
-  if (justPressed['ArrowRight'] || justPressed['KeyD']) { orbitCursor = (orbitCursor + 1) % s.planets.length; sfx.select(); }
+  if (justPressed['ArrowLeft'] || justPressed['KeyA']) { orbitCursor = (orbitCursor - 1 + s.planets.length) % s.planets.length; sfx.select(); scanTimer = 0; }
+  if (justPressed['ArrowRight'] || justPressed['KeyD']) { orbitCursor = (orbitCursor + 1) % s.planets.length; sfx.select(); scanTimer = 0; }
 
-  // Scan planet
+  // Scan planet (hold Space to scan, reveals deposit info)
+  const p = s.planets[orbitCursor];
   if (keys['Space'] || keys['Enter']) {
-    const p = s.planets[orbitCursor];
     if (!p.scanned) {
       scanTimer++;
-      if (scanTimer >= 40) {
+      if (scanTimer >= 30) {
         p.scanned = true;
-        minerals += p.minerals;
-        fuel += p.fuel;
-        scanTimer = 0;
-        sfx.pickup();
-        gameMessage = `+${p.minerals} minerals, +${p.fuel} fuel`;
+        sfx.confirm();
+        gameMessage = `Scan complete: ${p.deposits.length} deposits detected`;
         messageTimer = 60;
       }
     }
   } else {
-    scanTimer = 0;
+    if (scanTimer > 0 && scanTimer < 30) scanTimer = 0;
+  }
+
+  // Launch lander (L key or Z key) — SC2's core planet exploration
+  if ((justPressed['KeyL'] || justPressed['KeyZ']) && p.landable) {
+    initLander(orbitCursor);
+    state = 'lander';
+    sfx.confirm();
   }
 
   // Collect artifact
@@ -3860,27 +3920,35 @@ function drawOrbit() {
   ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
   ctx.fillText('Type:', panX + 6, ppy + ppr + 30);
   ctx.fillStyle = '#aaccff'; ctx.fillText(p.type || 'Unknown', panX + 40, ppy + ppr + 30);
-  // SC2-style data bars
-  ctx.fillStyle = '#6688aa'; ctx.fillText('Minerals:', panX + 6, ppy + ppr + 42);
-  if (!p.scanned) {
-    // Mineral bar
-    ctx.fillStyle = '#111'; ctx.fillRect(panX + 54, ppy + ppr + 36, 50, 5);
-    ctx.fillStyle = '#ffcc44'; ctx.fillRect(panX + 54, ppy + ppr + 36, Math.min(50, p.minerals * 2), 5);
-    ctx.fillStyle = '#aaccff'; ctx.fillText(p.minerals.toString(), panX + 54 + 52, ppy + ppr + 42);
-    ctx.fillStyle = '#6688aa'; ctx.fillText('Fuel:', panX + 6, ppy + ppr + 54);
-    ctx.fillStyle = '#111'; ctx.fillRect(panX + 54, ppy + ppr + 48, 50, 5);
-    ctx.fillStyle = '#44ccff'; ctx.fillRect(panX + 54, ppy + ppr + 48, Math.min(50, p.fuel * 3), 5);
-    ctx.fillStyle = '#aaccff'; ctx.fillText(p.fuel.toString(), panX + 54 + 52, ppy + ppr + 54);
+  // SC2-style data readout
+  if (p.scanned) {
+    // Show deposit breakdown when scanned
+    const remaining = p.deposits.filter(d => !d.collected).length;
+    ctx.fillStyle = '#6688aa'; ctx.fillText('Deposits:', panX + 6, ppy + ppr + 42);
+    ctx.fillStyle = '#ffcc44'; ctx.fillText(`${remaining}/${p.deposits.length}`, panX + 60, ppy + ppr + 42);
+    ctx.fillStyle = '#6688aa'; ctx.fillText('Value:', panX + 6, ppy + ppr + 54);
+    const remValue = p.deposits.filter(d => !d.collected).reduce((s, d) => s + MINERAL_TYPES[d.type].value, 0);
+    ctx.fillStyle = '#ffcc44'; ctx.fillText(`${remValue} RU`, panX + 42, ppy + ppr + 54);
+    ctx.fillStyle = '#6688aa'; ctx.fillText('Bio:', panX + 6, ppy + ppr + 66);
+    ctx.fillStyle = '#44ff44'; ctx.fillText(`${p.bioCount || 0}`, panX + 30, ppy + ppr + 66);
+    ctx.fillStyle = '#6688aa'; ctx.fillText('Hazard:', panX + 6, ppy + ppr + 78);
+    const hazLevels = ['None', 'Low', 'Medium', 'High'];
+    const hazColors = ['#44ff44', '#ffcc44', '#ff8844', '#ff4444'];
+    ctx.fillStyle = hazColors[p.hazard || 0]; ctx.fillText(hazLevels[p.hazard || 0], panX + 48, ppy + ppr + 78);
   } else {
-    ctx.fillStyle = '#44ff44'; ctx.font = 'bold 8px monospace';
-    ctx.fillText('COLLECTED', panX + 6, ppy + ppr + 42);
+    ctx.fillStyle = '#6688aa'; ctx.fillText('HOLD SPACE', panX + 6, ppy + ppr + 42);
+    ctx.fillStyle = '#6688aa'; ctx.fillText('to scan', panX + 6, ppy + ppr + 54);
   }
 
-  // Scan button prompt
-  if (!p.scanned) {
+  // Land prompt (for landable planets)
+  if (p.landable) {
     ctx.fillStyle = '#223366'; ctx.fillRect(panX + 4, panH2 - 20, panW2 - 8, 16);
     ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#88ccff' : '#4488cc'; ctx.font = 'bold 8px monospace';
-    ctx.fillText('HOLD SPACE', panX + 14, panH2 - 8);
+    ctx.fillText('Z/L to LAND', panX + 10, panH2 - 8);
+  } else {
+    ctx.fillStyle = '#223344'; ctx.fillRect(panX + 4, panH2 - 20, panW2 - 8, 16);
+    ctx.fillStyle = '#664444'; ctx.font = '7px monospace';
+    ctx.fillText('Cannot land', panX + 14, panH2 - 8);
   }
 
   // Scan progress
@@ -3922,7 +3990,7 @@ function drawOrbit() {
   ctx.fillStyle = '#ffcc44'; ctx.fillText(`RU:${minerals}`, 55, H - 4);
   ctx.fillStyle = '#44cc88'; ctx.fillText(`CREW:${crew}`, 100, H - 4);
   ctx.fillStyle = '#445566'; ctx.textAlign = 'right'; ctx.font = '7px monospace';
-  ctx.fillText('LEFT/RIGHT  SPACE scan  Q back', W - 4, H - 4);
+  ctx.fillText('LEFT/RIGHT  SPACE scan  Z land  Q back', W - 4, H - 4);
   ctx.textAlign = 'left';
 
   // Message
@@ -3954,9 +4022,16 @@ function updateDialogue() {
     if (justPressed['Space'] || justPressed['Enter']) {
       const act = dialogue.action;
       if (act === 'fight' || act === 'spar') {
-        state = 'combat';
-        initCombat(dialogue.race);
-        music.play(dialogue.race === 'orz' ? 'boss' : 'combat');
+        combatEnemy = dialogue.race;
+        if (fleet.length > 1) {
+          state = 'fleetselect';
+          fleetCursor = 0;
+          sfx.confirm();
+        } else {
+          state = 'combat';
+          initCombat(combatEnemy);
+          music.play(combatEnemy === 'orz' ? 'boss' : 'combat');
+        }
       } else if (act === 'trade') {
         if (minerals >= (dialogue.cost || 0)) {
           minerals -= dialogue.cost;
@@ -3997,6 +4072,20 @@ function updateDialogue() {
         defeatedAliens.add(dialogue.starIdx);
         gameMessage = '+30 minerals!';
         messageTimer = 90;
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'ally') {
+        // Alien joins your fleet! (SC2's alliance system)
+        const race = dialogue.race;
+        if (!fleet.includes(race)) {
+          fleet.push(race);
+          defeatedAliens.add(dialogue.starIdx);
+          gameMessage = `${SHIP_TYPES[race].race} joins your fleet!`;
+          messageTimer = 120;
+          sfx.victory();
+        } else {
+          gameMessage = 'Already in your fleet.';
+          messageTimer = 60;
+        }
         returnAfterDialogue(); sfx.confirm();
       } else if (act === 'flee') {
         returnToHyperSpace(); sfx.warp();
@@ -4127,6 +4216,361 @@ function drawDialogue() {
   ctx.textAlign = 'left';
 }
 
+// ==================== SCREEN: PLANET LANDER (SC2 Surface Exploration) ====================
+function initLander(planetIdx) {
+  currentPlanetIdx = planetIdx;
+  const s = starMap[currentStarIdx];
+  const p = s.planets[planetIdx];
+  surfaceWidth = 640;
+  surfaceHeight = 200;
+  // Generate terrain height map (SC2 had scrolling terrain)
+  surfaceTerrain = [];
+  const baseH = p.type === 'Rocky' ? 40 : p.type === 'Volcanic' ? 50 : p.type === 'Desert' ? 30 : p.type === 'Ice' ? 35 : 25;
+  for (let i = 0; i <= surfaceWidth; i++) {
+    const h = baseH + Math.sin(i * 0.02) * 15 + Math.sin(i * 0.05) * 8 + Math.sin(i * 0.13) * 4;
+    surfaceTerrain.push(Math.floor(h));
+  }
+  // Place mineral deposits on terrain
+  surfaceDeposits = [];
+  for (const dep of p.deposits) {
+    const dx = Math.floor(dep.x / 640 * surfaceWidth);
+    const tx = clamp(dx, 5, surfaceWidth - 5);
+    surfaceDeposits.push({
+      x: tx, y: surfaceHeight - surfaceTerrain[tx] - 2,
+      type: dep.type, collected: dep.collected,
+      origIdx: p.deposits.indexOf(dep),
+    });
+  }
+  // Place biological lifeforms
+  surfaceBio = [];
+  for (let i = 0; i < (p.bioCount || 0); i++) {
+    const bx = 40 + Math.random() * (surfaceWidth - 80);
+    surfaceBio.push({
+      x: bx, y: surfaceHeight - surfaceTerrain[Math.floor(bx)] - 4,
+      type: Math.floor(Math.random() * 4), alive: true,
+      vx: (Math.random() - 0.5) * 1.5, vy: 0,
+    });
+  }
+  // Hazard timers
+  surfaceHazards = [];
+  // Lander state
+  landerX = surfaceWidth / 2;
+  landerY = 20; // starts high (descending)
+  landerVX = 0; landerVY = 0;
+  landerAngle = 0;
+  landerFuel = 50;
+  landerCargo = [];
+  landerMaxCargo = 10;
+  landerHP = 5;
+  landerMaxHP = 5;
+}
+
+function updateLander() {
+  const s = starMap[currentStarIdx];
+  const p = s.planets[currentPlanetIdx];
+  const gravity = 0.08;
+  const thrustPow = 0.2;
+
+  // Controls — SC2 lander: left/right move, up thrusts against gravity
+  if (keys['ArrowLeft'] || keys['KeyA']) landerVX -= 0.15;
+  if (keys['ArrowRight'] || keys['KeyD']) landerVX += 0.15;
+  if (keys['ArrowUp'] || keys['KeyW']) {
+    landerVY -= thrustPow;
+    if (landerFuel > 0) landerFuel -= 0.05;
+  }
+
+  // Gravity
+  landerVY += gravity;
+  // Drag
+  landerVX *= 0.97; landerVY *= 0.99;
+  // Speed limit
+  landerVX = clamp(landerVX, -4, 4);
+  landerVY = clamp(landerVY, -4, 4);
+  // Move
+  landerX += landerVX;
+  landerY += landerVY;
+  // Wrap horizontally (planet surface wraps)
+  if (landerX < 0) landerX += surfaceWidth;
+  if (landerX >= surfaceWidth) landerX -= surfaceWidth;
+  // Terrain collision
+  const terrH = surfaceTerrain[clamp(Math.floor(landerX), 0, surfaceWidth)];
+  const groundY = surfaceHeight - terrH;
+  if (landerY >= groundY - 4) {
+    landerY = groundY - 4;
+    landerVY = Math.min(0, landerVY);
+    // Hard landing damage
+    if (landerVY > 2) { landerHP--; sfx.hit(); }
+    landerVX *= 0.9; // ground friction
+  }
+  // Ceiling
+  if (landerY < 2) landerY = 2;
+
+  // Collect mineral deposits
+  for (const dep of surfaceDeposits) {
+    if (!dep.collected && Math.abs(landerX - dep.x) < 8 && Math.abs(landerY - dep.y) < 8) {
+      if (landerCargo.length < landerMaxCargo) {
+        dep.collected = true;
+        landerCargo.push(dep.type);
+        // Mark original deposit as collected
+        p.deposits[dep.origIdx].collected = true;
+        sfx.pickup();
+      }
+    }
+  }
+
+  // Collect bio
+  for (const bio of surfaceBio) {
+    if (bio.alive && Math.abs(landerX - bio.x) < 8 && Math.abs(landerY - bio.y) < 8) {
+      if (landerCargo.length < landerMaxCargo) {
+        bio.alive = false;
+        landerCargo.push(-1); // -1 = bio data
+        sfx.pickup();
+      }
+    }
+  }
+
+  // Update bio creatures
+  for (const bio of surfaceBio) {
+    if (!bio.alive) continue;
+    bio.x += bio.vx;
+    if (bio.x < 10 || bio.x > surfaceWidth - 10) bio.vx *= -1;
+    const bTerrH = surfaceTerrain[clamp(Math.floor(bio.x), 0, surfaceWidth)];
+    bio.y = surfaceHeight - bTerrH - 4;
+  }
+
+  // Hazards based on planet type
+  if (p.hazard > 0 && frame % 60 === 0 && Math.random() < p.hazard * 0.15) {
+    // Spawn hazard (earthquake/lightning/lava)
+    const hx = landerX + (Math.random() - 0.5) * 200;
+    const hType = p.type === 'Volcanic' ? 'lava' : p.type === 'Toxic' ? 'acid' : 'quake';
+    surfaceHazards.push({ x: hx, y: surfaceHeight - 10, type: hType, timer: 40 + Math.random() * 30 });
+  }
+  // Update hazards
+  for (let i = surfaceHazards.length - 1; i >= 0; i--) {
+    const h = surfaceHazards[i];
+    h.timer--;
+    // Damage lander if close
+    if (h.timer > 10 && h.timer < 30 && Math.abs(landerX - h.x) < 20 && landerY > surfaceHeight - 40) {
+      if (frame % 15 === 0) { landerHP--; sfx.hit(); screenShake = 3; }
+    }
+    if (h.timer <= 0) surfaceHazards.splice(i, 1);
+  }
+
+  // Launch back to orbit (Escape or Q)
+  if (justPressed['Escape'] || justPressed['KeyQ'] || landerHP <= 0) {
+    // Return cargo to ship
+    let totalMinerals = 0;
+    let bioData = 0;
+    for (const c of landerCargo) {
+      if (c === -1) { bioData++; minerals += 3; totalMinerals += 3; }
+      else { const val = MINERAL_TYPES[c].value; minerals += val; totalMinerals += val; }
+    }
+    if (landerHP <= 0) {
+      crew = Math.max(0, crew - 3);
+      gameMessage = `Lander destroyed! Lost 3 crew. Salvaged ${totalMinerals} RU`;
+    } else {
+      gameMessage = `Collected ${totalMinerals} RU${bioData > 0 ? `, ${bioData} bio` : ''}`;
+    }
+    messageTimer = 90;
+    state = 'orbit';
+    sfx.confirm();
+  }
+}
+
+function drawLander() {
+  const s = starMap[currentStarIdx];
+  const p = s.planets[currentPlanetIdx];
+  const camX = clamp(landerX - W / 2, 0, Math.max(0, surfaceWidth - W));
+
+  // === SC2 Planet Surface Background ===
+  // Sky color based on planet type
+  const skyColors = {
+    Rocky: '#1a0800', Volcanic: '#2a0800', Desert: '#1a1400',
+    Water: '#001122', Jungle: '#001808', Ice: '#0a1020',
+    Toxic: '#0a1400', 'Gas Giant': '#0a0000',
+  };
+  ctx.fillStyle = skyColors[p.type] || '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars in sky (top portion)
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = '#888';
+    ctx.fillRect((i * 47 + 3) % W, (i * 29 + 5) % (surfaceHeight - 30), 1, 1);
+  }
+
+  // Terrain
+  const terrColor1 = {
+    Rocky: '#664422', Volcanic: '#442211', Desert: '#886633',
+    Water: '#224466', Jungle: '#225522', Ice: '#556688',
+    Toxic: '#445522', 'Gas Giant': '#443322',
+  };
+  const terrColor2 = {
+    Rocky: '#553311', Volcanic: '#331100', Desert: '#775522',
+    Water: '#113355', Jungle: '#114411', Ice: '#445577',
+    Toxic: '#334411', 'Gas Giant': '#332211',
+  };
+
+  // Draw terrain fill
+  ctx.fillStyle = terrColor1[p.type] || '#444';
+  for (let sx = 0; sx < W; sx++) {
+    const wx = Math.floor(sx + camX);
+    if (wx < 0 || wx >= surfaceWidth) continue;
+    const th = surfaceTerrain[wx];
+    ctx.fillRect(sx, surfaceHeight - th, 1, th);
+  }
+  // Terrain surface line
+  ctx.fillStyle = terrColor2[p.type] || '#333';
+  for (let sx = 0; sx < W; sx++) {
+    const wx = Math.floor(sx + camX);
+    if (wx < 0 || wx >= surfaceWidth) continue;
+    const th = surfaceTerrain[wx];
+    ctx.fillRect(sx, surfaceHeight - th, 1, 2);
+  }
+
+  // Mineral deposits
+  for (const dep of surfaceDeposits) {
+    if (dep.collected) continue;
+    const dx = dep.x - camX;
+    if (dx < -10 || dx > W + 10) continue;
+    const mt = MINERAL_TYPES[dep.type];
+    ctx.fillStyle = mt.color;
+    // SC2 mineral dots: small colored squares
+    ctx.fillRect(dx - 2, dep.y - 2, 4, 4);
+    ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.4;
+    ctx.fillRect(dx - 1, dep.y - 1, 1, 1);
+    ctx.globalAlpha = 1;
+  }
+
+  // Bio creatures
+  for (const bio of surfaceBio) {
+    if (!bio.alive) continue;
+    const bx = bio.x - camX;
+    if (bx < -10 || bx > W + 10) continue;
+    const bioColors = ['#44ff44', '#44ffaa', '#aaff44', '#ffaa44'];
+    ctx.fillStyle = bioColors[bio.type % bioColors.length];
+    // Simple creature shapes
+    ctx.fillRect(bx - 3, bio.y - 3, 6, 4);
+    ctx.fillRect(bx - 1, bio.y - 5, 2, 2); // head
+    // Legs
+    ctx.fillRect(bx - 3, bio.y + 1, 1, 2);
+    ctx.fillRect(bx + 2, bio.y + 1, 1, 2);
+  }
+
+  // Hazards
+  for (const h of surfaceHazards) {
+    const hx = h.x - camX;
+    if (hx < -30 || hx > W + 30) continue;
+    if (h.type === 'lava') {
+      ctx.fillStyle = '#ff4400'; ctx.globalAlpha = 0.5 + Math.sin(frame * 0.2) * 0.3;
+      ctx.fillRect(hx - 10, surfaceHeight - 15, 20, 15);
+      ctx.fillStyle = '#ffcc00'; ctx.globalAlpha = 0.6;
+      ctx.fillRect(hx - 6, surfaceHeight - 10, 12, 8);
+      ctx.globalAlpha = 1;
+    } else if (h.type === 'acid') {
+      ctx.fillStyle = '#88ff00'; ctx.globalAlpha = 0.4;
+      for (let i = 0; i < 3; i++) {
+        const ax = hx + Math.sin(frame * 0.1 + i * 2) * 8;
+        ctx.fillRect(ax - 2, surfaceHeight - 20 - i * 6, 4, 4);
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      // Quake — screen shake
+      if (h.timer > 15 && h.timer < 35) screenShake = 2;
+    }
+  }
+
+  // === Lander ===
+  const lx = landerX - camX;
+  const ly = landerY;
+  // Lander body (SC2 style — small boxy vehicle)
+  ctx.fillStyle = '#888899';
+  ctx.fillRect(lx - 4, ly - 4, 8, 6);
+  ctx.fillStyle = '#aaaabb';
+  ctx.fillRect(lx - 3, ly - 3, 6, 4);
+  // Cockpit
+  ctx.fillStyle = '#44aaff';
+  ctx.fillRect(lx - 1, ly - 3, 2, 2);
+  // Landing legs
+  ctx.fillStyle = '#666677';
+  ctx.fillRect(lx - 5, ly + 2, 2, 2);
+  ctx.fillRect(lx + 3, ly + 2, 2, 2);
+  // Thruster flame
+  if (keys['ArrowUp'] || keys['KeyW']) {
+    ctx.fillStyle = '#ff8844'; ctx.globalAlpha = 0.7 + Math.random() * 0.3;
+    ctx.fillRect(lx - 2, ly + 4, 4, 3 + Math.random() * 3);
+    ctx.fillStyle = '#ffcc44';
+    ctx.fillRect(lx - 1, ly + 4, 2, 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // === HUD (SC2 lander HUD) ===
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, surfaceHeight, W, H - surfaceHeight);
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(0, surfaceHeight, W, 2);
+
+  // HP bar
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+  ctx.fillText('HULL', 4, surfaceHeight + 12);
+  for (let i = 0; i < landerMaxHP; i++) {
+    ctx.fillStyle = i < landerHP ? '#44ff44' : '#331111';
+    ctx.fillRect(30 + i * 10, surfaceHeight + 6, 8, 6);
+  }
+
+  // Cargo
+  ctx.fillStyle = '#6688aa';
+  ctx.fillText('CARGO', 4, surfaceHeight + 24);
+  for (let i = 0; i < landerMaxCargo; i++) {
+    if (i < landerCargo.length) {
+      const c = landerCargo[i];
+      ctx.fillStyle = c === -1 ? '#44ff44' : MINERAL_TYPES[c].color;
+    } else {
+      ctx.fillStyle = '#222233';
+    }
+    ctx.fillRect(40 + i * 8, surfaceHeight + 18, 6, 6);
+  }
+
+  // Fuel
+  ctx.fillStyle = '#6688aa';
+  ctx.fillText('FUEL', 160, surfaceHeight + 12);
+  ctx.fillStyle = '#111'; ctx.fillRect(186, surfaceHeight + 6, 40, 6);
+  ctx.fillStyle = landerFuel > 10 ? '#22cc44' : '#cc4400';
+  ctx.fillRect(186, surfaceHeight + 6, 40 * (landerFuel / 50), 6);
+
+  // Planet info
+  ctx.fillStyle = '#aaccff'; ctx.font = '7px monospace';
+  ctx.fillText(p.name, 240, surfaceHeight + 12);
+  ctx.fillStyle = '#6688aa';
+  ctx.fillText(p.type, 240, surfaceHeight + 24);
+
+  // Controls
+  ctx.fillStyle = '#445566'; ctx.font = '6px monospace';
+  ctx.fillText('ARROWS move  Q launch', 4, H - 2);
+
+  // Remaining deposits count
+  const remaining = surfaceDeposits.filter(d => !d.collected).length;
+  const bioRemain = surfaceBio.filter(b => b.alive).length;
+  ctx.fillStyle = '#ffcc44'; ctx.font = '7px monospace';
+  ctx.fillText(`${remaining} deposits`, 160, surfaceHeight + 24);
+  if (bioRemain > 0) {
+    ctx.fillStyle = '#44ff44';
+    ctx.fillText(`${bioRemain} life`, 230, surfaceHeight + 24);
+  }
+
+  // Warning for hazards
+  if (surfaceHazards.length > 0) {
+    ctx.fillStyle = '#ff4444'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    if (Math.floor(frame / 10) % 2) ctx.fillText('!! HAZARD !!', W/2, 12);
+    ctx.textAlign = 'left';
+  }
+
+  // Message
+  if (messageTimer > 0) {
+    messageTimer--;
+    ctx.fillStyle = '#ffcc44'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(gameMessage, W/2, surfaceHeight - 10);
+    ctx.textAlign = 'left';
+  }
+}
+
 // ==================== SCREEN: COMBAT ====================
 function updateCombat() {
   // Player input
@@ -4234,18 +4678,36 @@ function updateCombat() {
 
   // Check win/lose
   if (!playerShip.alive) {
-    crew = 0;
     sfx.explode();
     spawnParticles(playerShip.x, playerShip.y, '#ff4400', 12, 3);
-    setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 800);
     playerShip.alive = true; playerShip.crew = -1; // prevent re-trigger
+    if (playerShip.isAlly) {
+      // Ally ship destroyed — remove from fleet, pick next ship
+      const idx = fleet.indexOf(playerShip.allyType);
+      if (idx > -1) fleet.splice(idx, 1);
+      if (fleet.length === 0) {
+        crew = 0;
+        setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 800);
+      } else {
+        setTimeout(() => {
+          state = 'fleetselect';
+          fleetCursor = 0;
+          gameMessage = playerShip.def.race + ' ship destroyed!';
+          messageTimer = 90;
+        }, 800);
+      }
+    } else {
+      // Player flagship destroyed — game over
+      crew = 0;
+      setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 800);
+    }
   }
   if (!enemyShip.alive && enemyShip.crew === 0) {
     sfx.explode();
     spawnParticles(enemyShip.x, enemyShip.y, enemyShip.def.color, 12, 3);
     enemyShip.crew = -1; // prevent re-trigger
     defeatedAliens.add(dialogue ? dialogue.starIdx : -1);
-    crew = playerShip.crew;
+    if (!playerShip.isAlly) crew = playerShip.crew;
     // Check if this was the final boss
     if (enemyShip.type === 'orz' && artifacts >= 3) {
       setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 1000);
@@ -4593,6 +5055,118 @@ function drawVictory() {
   }
 }
 
+// ==================== FLEET SELECT (SC2 ship picker) ====================
+function updateFleetSelect() {
+  if (justPressed['ArrowUp'] || justPressed['w']) {
+    fleetCursor = (fleetCursor - 1 + fleet.length) % fleet.length;
+    sfx.select();
+  }
+  if (justPressed['ArrowDown'] || justPressed['s']) {
+    fleetCursor = (fleetCursor + 1) % fleet.length;
+    sfx.select();
+  }
+  if (justPressed['Enter'] || justPressed['Space']) {
+    const chosen = fleet[fleetCursor];
+    if (chosen === 'player') {
+      state = 'combat';
+      initCombat(combatEnemy);
+    } else {
+      state = 'combat';
+      initCombatAlly(chosen, combatEnemy);
+    }
+    music.play(combatEnemy === 'orz' ? 'boss' : 'combat');
+    sfx.confirm();
+  }
+  if (justPressed['Escape']) {
+    state = 'dialogue';
+    sfx.select();
+  }
+}
+
+function drawFleetSelect() {
+  ctx.fillStyle = '#000011';
+  ctx.fillRect(0, 0, W, H);
+  drawStarField(0, 0, 40, false);
+
+  // Title
+  ctx.fillStyle = '#44aaff';
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SELECT YOUR SHIP', W / 2, 24);
+
+  // Enemy info on right side
+  const eDef = SHIP_TYPES[combatEnemy];
+  ctx.fillStyle = '#ff4444';
+  ctx.font = '10px monospace';
+  ctx.fillText('ENEMY: ' + (eDef ? eDef.race + ' ' + eDef.name : combatEnemy), W / 2, 40);
+
+  // Fleet list
+  const startY = 58;
+  const rowH = 28;
+  ctx.textAlign = 'left';
+
+  for (let i = 0; i < fleet.length; i++) {
+    const shipKey = fleet[i];
+    const def = SHIP_TYPES[shipKey];
+    const y = startY + i * rowH;
+    const selected = i === fleetCursor;
+
+    // Highlight box
+    if (selected) {
+      ctx.fillStyle = '#223366';
+      ctx.fillRect(20, y - 10, W - 40, rowH - 2);
+      ctx.strokeStyle = '#4488ff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(20, y - 10, W - 40, rowH - 2);
+    }
+
+    // Ship icon (small version)
+    ctx.save();
+    ctx.translate(40, y + 2);
+    ctx.scale(0.4, 0.4);
+    if (def && def.draw) def.draw(ctx, { x: 0, y: 0, angle: -Math.PI/2, isPlayer: true });
+    ctx.restore();
+
+    // Ship name and stats
+    ctx.fillStyle = selected ? '#ffffff' : '#8899aa';
+    ctx.font = selected ? 'bold 10px monospace' : '10px monospace';
+    ctx.fillText((def ? def.race + ' ' + def.name : shipKey), 62, y + 2);
+
+    // Crew bar
+    if (def) {
+      ctx.fillStyle = '#226622';
+      ctx.fillRect(200, y - 4, 60, 8);
+      ctx.fillStyle = '#44cc44';
+      const crewPct = shipKey === 'player' ? crew / (def.maxCrew + getModuleStat('crew')) : 1;
+      ctx.fillRect(200, y - 4, 60 * Math.min(1, crewPct), 8);
+      ctx.fillStyle = '#aaddaa';
+      ctx.font = '7px monospace';
+      ctx.fillText('CREW', 205, y + 2);
+    }
+  }
+
+  // Instructions
+  ctx.fillStyle = '#667788';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('UP/DOWN to select, ENTER to launch, ESC to cancel', W / 2, H - 10);
+}
+
+function initCombatAlly(allyType, enemyType) {
+  // Initialize combat with an allied ship instead of player's flagship
+  const aDef = SHIP_TYPES[allyType];
+  playerShip = new Ship(allyType, -120, 0, 0, true);
+  playerShip.crew = aDef.maxCrew;
+  playerShip.def = { ...aDef };
+  playerShip.isAlly = true;
+  playerShip.allyType = allyType;
+
+  enemyShip = new Ship(enemyType, 120, 0, Math.PI, false);
+  projectiles = []; particles = [];
+  combatPlanet = { x: 0, y: 0, radius: PLANET_RADIUS };
+  window._combatZoom = 0.5;
+}
+
 // ==================== MAIN GAME LOOP ====================
 function gameLoop() {
   try {
@@ -4619,10 +5193,16 @@ function gameLoop() {
     music.play('map');
     updateOrbit();
     drawOrbit();
+  } else if (state === 'lander') {
+    updateLander();
+    drawLander();
   } else if (state === 'dialogue') {
     music.play('dialogue');
     updateDialogue();
     drawDialogue();
+  } else if (state === 'fleetselect') {
+    updateFleetSelect();
+    drawFleetSelect();
   } else if (state === 'combat') {
     updateCombat();
     drawCombat();
