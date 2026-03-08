@@ -248,6 +248,7 @@ const MODULE_DEFS = [
   { name: 'Shiva Furnace', desc: 'Fire rate +30%', cost: 50, stat: 'firerate', val: 0.7, icon: '#ff8844' },
   { name: 'Point Defense', desc: 'Auto-destroy nearby shots', cost: 60, stat: 'pointdef', val: 1, icon: '#aaaaff' },
   { name: 'Dynamo Unit', desc: 'Energy recharge +50%', cost: 45, stat: 'energy', val: 0.5, icon: '#88ffaa' },
+  { name: 'QuasiSpace Portal', desc: 'Press Q in HyperSpace to enter QuasiSpace', cost: 100, stat: 'quasi', val: 1, icon: '#44ff88' },
 ];
 let visitedStars;
 let defeatedAliens;
@@ -256,6 +257,28 @@ let currentStarIdx;
 // Fleet system (SC2 — you collect allied ships)
 let fleet; // array of ship type keys e.g. ['player', 'spathi', 'pkunk']
 let fleetCursor;
+
+// QuasiSpace (SC2's green dimension with portal shortcuts)
+let inQuasiSpace;
+let quasiX, quasiY, quasiVX, quasiVY, quasiAngle;
+const QUASI_PORTALS = [
+  // Each portal exits to a different part of HyperSpace
+  { qx: 0, qy: 0, hx: -300, hy: 700, label: 'Arilou Exit' },
+  { qx: 150, qy: -80, hx: 0, hy: 0, label: 'Sol Region' },
+  { qx: -120, qy: 100, hx: -500, hy: -400, label: 'Ur-Quan Space' },
+  { qx: 80, qy: 130, hx: 600, hy: 400, label: 'Mycon Space' },
+  { qx: -80, qy: -120, hx: 700, hy: -600, label: 'Kohr-Ah Space' },
+  { qx: 170, qy: 80, hx: -200, hy: -700, label: 'Orz Space' },
+  { qx: -160, qy: -50, hx: 800, hy: 700, label: 'Druuge Space' },
+  { qx: 30, qy: -160, hx: -800, hy: -200, label: 'Yehat Space' },
+  { qx: -50, qy: 170, hx: 400, hy: 700, label: 'Supox Space' },
+  { qx: 120, qy: -150, hx: -100, hy: 900, label: 'Shofixti Space' },
+  { qx: -170, qy: 140, hx: 200, hy: 500, label: 'Chmmr Space' },
+  { qx: 100, qy: 170, hx: -600, hy: 100, label: 'Pkunk Space' },
+  { qx: -140, qy: -140, hx: 900, hy: -200, label: 'VUX Space' },
+  { qx: 160, qy: -30, hx: -700, hy: -600, label: 'Thraddash Space' },
+  { qx: -30, qy: -170, hx: 800, hy: 100, label: 'Utwig Space' },
+];
 
 // Planet lander state (SC2's surface exploration mini-game)
 let landerX, landerY, landerVX, landerVY, landerAngle, landerFuel;
@@ -1727,20 +1750,28 @@ function generateStarMap() {
     { type: 'Volcanic', colors: ['#cc4422','#dd5533','#aa3311'], minR: 8, maxR: 14 },
     { type: 'Desert', colors: ['#ccaa44','#ddbb55','#bbaa33'], minR: 9, maxR: 15 },
     { type: 'Toxic', colors: ['#88aa22','#99bb33','#77aa11'], minR: 9, maxR: 13 },
+    { type: 'Rainbow', colors: ['#ff4488','#44ff88','#4488ff','#ffcc44','#ff8844','#cc44ff'], minR: 12, maxR: 18 },
   ];
   const romanNums = ['I','II','III','IV','V','VI','VII','VIII'];
 
   function makePlanets(starName, count) {
     const plnts = [];
     for (let j = 0; j < count; j++) {
-      const pt = planetTypes[Math.floor(Math.random() * planetTypes.length)];
+      // Rainbow worlds are rare (~3% chance)
+      let pt;
+      if (Math.random() < 0.03) {
+        pt = planetTypes[planetTypes.length - 1]; // Rainbow
+      } else {
+        pt = planetTypes[Math.floor(Math.random() * (planetTypes.length - 1))];
+      }
       const pColor = pt.colors[Math.floor(Math.random() * pt.colors.length)];
       const isGas = pt.type === 'Gas Giant';
+      const isRainbow = pt.type === 'Rainbow';
       // SC2: each planet has mineral deposits on its surface
-      const depositCount = isGas ? 0 : Math.floor(5 + Math.random() * 15);
+      const depositCount = isGas ? 0 : isRainbow ? 25 : Math.floor(5 + Math.random() * 15);
       const deposits = [];
       // Richer planets get rarer minerals
-      const richness = pt.type === 'Volcanic' ? 3 : pt.type === 'Rocky' ? 2 : pt.type === 'Desert' ? 1.5 : 1;
+      const richness = isRainbow ? 10 : pt.type === 'Volcanic' ? 3 : pt.type === 'Rocky' ? 2 : pt.type === 'Desert' ? 1.5 : 1;
       for (let d = 0; d < depositCount; d++) {
         // Weighted mineral type based on richness
         let typeIdx = Math.floor(Math.random() * Math.min(MINERAL_TYPES.length, 3 + richness * 2));
@@ -1753,7 +1784,7 @@ function generateStarMap() {
         });
       }
       // Hazard level based on planet type
-      const hazard = pt.type === 'Volcanic' ? 3 : pt.type === 'Toxic' ? 2 :
+      const hazard = isRainbow ? 0 : pt.type === 'Volcanic' ? 3 : pt.type === 'Toxic' ? 2 :
         pt.type === 'Desert' ? 1 : pt.type === 'Ice' ? 1 : 0;
       // Bio life
       const bioCount = pt.type === 'Jungle' ? Math.floor(3 + Math.random() * 5) :
@@ -1763,7 +1794,7 @@ function generateStarMap() {
         name: `${starName} ${romanNums[j]}`,
         type: pt.type, color: pColor,
         radius: pt.minR + Math.floor(Math.random() * (pt.maxR - pt.minR)),
-        landable: !isGas,
+        landable: !isGas || isRainbow,
         deposits: deposits,
         hazard: hazard,
         bioCount: bioCount,
@@ -2005,6 +2036,8 @@ const DIALOGUES = {
       { text: 'Why do you protect humanity?', response: 'There are... things in the spaces between dimensions. The Orz are merely one such entity. Your species has a quality that draws their attention. We have been... pruning that quality. Shielding you. The rift makes our work harder.', action: 'info' },
       { text: 'Can you help us close the rift?', response: 'We have been trying, in our way. The Precursor Seals are the key. We can sense their locations dimly. One is near Orz space, another near the Kohr-Ah, the third near the Mycon. Take this fuel for your journey. +30 fuel.', action: 'fuel' },
       { text: 'Help us fight!', response: 'Fighting is... crude. But the Skiff is swift, and our aim is true. We shall demonstrate, if you insist. Know that we harbor no ill will.', action: 'spar' },
+      { text: 'Can you open a QuasiSpace portal?', response: 'Ah, you wish to travel through the *between*. Very well. We shall open a portal to QuasiSpace for you. The green dimension has many exits — each leads to a different region of HyperSpace. Travel safely, human.', action: 'quasispace' },
+      { text: 'Will you join our fleet?', response: 'We have watched your species grow, and now you ask us to fly alongside you. Very well. An Arilou Skiff will accompany you. We are... curious to see your journey from this perspective.', action: 'ally' },
     ],
   },
   druuge: {
@@ -2058,6 +2091,8 @@ function initGame() {
   hyperX = 0; hyperY = 0; hyperVX = 0; hyperVY = 0;
   hyperAngle = -Math.PI / 2; hyperDest = null;
   hyperEncounterTimer = 0;
+  inQuasiSpace = false;
+  quasiX = 0; quasiY = 0; quasiVX = 0; quasiVY = 0; quasiAngle = 0;
   mapCamX = 0; mapCamY = 0;
   selectedStar = null;
   gameMessage = null; messageTimer = 0;
@@ -2939,7 +2974,59 @@ function drawTitle() {
 }
 
 // ==================== SCREEN: STAR MAP ====================
+function updateQuasiSpace() {
+  // QuasiSpace flight — similar to HyperSpace but in the green dimension
+  const turnRate = 0.06;
+  const thrustPower = 0.5;
+  const maxSpeed = 5;
+  const drag = 0.97;
+
+  if (keys['ArrowLeft'] || keys['KeyA']) quasiAngle -= turnRate;
+  if (keys['ArrowRight'] || keys['KeyD']) quasiAngle += turnRate;
+  if (keys['ArrowUp'] || keys['KeyW']) {
+    quasiVX += Math.cos(quasiAngle) * thrustPower;
+    quasiVY += Math.sin(quasiAngle) * thrustPower;
+  }
+  if (keys['ArrowDown'] || keys['KeyS']) {
+    quasiVX *= 0.92; quasiVY *= 0.92;
+  }
+  const spd = Math.hypot(quasiVX, quasiVY);
+  if (spd > maxSpeed) {
+    quasiVX = quasiVX / spd * maxSpeed;
+    quasiVY = quasiVY / spd * maxSpeed;
+  }
+  quasiX += quasiVX; quasiY += quasiVY;
+  quasiVX *= drag; quasiVY *= drag;
+  // No fuel cost in QuasiSpace (SC2 authentic)
+
+  // Check portal proximity
+  let nearestPortal = null, nearestDist = Infinity;
+  for (let i = 0; i < QUASI_PORTALS.length; i++) {
+    const p = QUASI_PORTALS[i];
+    const d = dist(quasiX, quasiY, p.qx, p.qy);
+    if (d < nearestDist) { nearestDist = d; nearestPortal = i; }
+  }
+
+  // Enter portal
+  if ((justPressed['Space'] || justPressed['Enter']) && nearestPortal !== null && nearestDist < 25) {
+    const p = QUASI_PORTALS[nearestPortal];
+    inQuasiSpace = false;
+    hyperX = p.hx; hyperY = p.hy;
+    hyperVX = 0; hyperVY = 0;
+    mapCamX = hyperX; mapCamY = hyperY;
+    gameMessage = `Exited to ${p.label}`;
+    messageTimer = 120;
+    sfx.warp();
+  }
+}
+
 function updateMap() {
+  // === QuasiSpace mode ===
+  if (inQuasiSpace) {
+    updateQuasiSpace();
+    return;
+  }
+
   // === SC2-style HyperSpace flight ===
   // Player flies the ship with arrow keys, burns fuel while moving
   const turnRate = 0.06;
@@ -3008,6 +3095,34 @@ function updateMap() {
     }
   }
 
+  // === Autopilot toward selected star (SC2: set destination) ===
+  if (selectedStar !== null && (keys['KeyA'] || keys['KeyZ'])) {
+    const target = starMap[selectedStar];
+    const dx = target.x - hyperX, dy = target.y - hyperY;
+    const targetAngle = Math.atan2(dy, dx);
+    // Smoothly turn toward target
+    let angleDiff = targetAngle - hyperAngle;
+    while (angleDiff > Math.PI) angleDiff -= TAU;
+    while (angleDiff < -Math.PI) angleDiff += TAU;
+    hyperAngle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), 0.06);
+    // Thrust if roughly facing target
+    if (Math.abs(angleDiff) < 0.5) {
+      hyperVX += Math.cos(hyperAngle) * thrustPower;
+      hyperVY += Math.sin(hyperAngle) * thrustPower;
+    }
+  }
+
+  // === QuasiSpace Portal Spawner (Q key) ===
+  if (justPressed['KeyQ'] && getModuleStat('quasi') > 0) {
+    inQuasiSpace = true;
+    quasiX = 0; quasiY = 0; quasiVX = 0; quasiVY = 0;
+    quasiAngle = -Math.PI / 2;
+    gameMessage = 'QuasiSpace portal opened!';
+    messageTimer = 90;
+    sfx.warp();
+    return;
+  }
+
   // === Random encounters in alien territory ===
   hyperEncounterTimer--;
   if (hyperEncounterTimer <= 0 && spd > 1) {
@@ -3050,7 +3165,189 @@ function returnAfterDialogue() {
 // HyperSpace trail particles
 let hyperTrail = [];
 
+function drawQuasiSpace() {
+  const hudH = 40;
+  const mapH = H - hudH;
+  const spd = Math.hypot(quasiVX, quasiVY);
+
+  // === SC2 QuasiSpace — eerie GREEN void ===
+  ctx.fillStyle = '#001a00'; ctx.fillRect(0, 0, W, mapH);
+
+  // Swirling green nebula clouds
+  const t = frame * 0.008;
+  for (let layer = 0; layer < 3; layer++) {
+    const cloudAlpha = 0.08 - layer * 0.02;
+    ctx.globalAlpha = cloudAlpha;
+    for (let ci = 0; ci < 10; ci++) {
+      const seed = ci * 137.5 + layer * 47;
+      const cx = ((seed * 73.1 + Math.sin(t + ci) * 20) % W + W) % W;
+      const cy = ((seed * 91.3 + Math.cos(t * 0.7 + ci) * 15) % mapH + mapH) % mapH;
+      const cRadius = 30 + (seed % 50);
+      ctx.fillStyle = layer === 0 ? '#004400' : layer === 1 ? '#003308' : '#002a04';
+      ctx.beginPath(); ctx.arc(cx, cy, cRadius, 0, TAU); ctx.fill();
+      ctx.fillStyle = layer === 0 ? '#006600' : '#004a08';
+      ctx.beginPath(); ctx.arc(cx, cy, cRadius * 0.5, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Faint green grid
+  const gridSz = 50;
+  ctx.globalAlpha = 0.15;
+  ctx.strokeStyle = '#004400'; ctx.lineWidth = 1;
+  const gox = ((-quasiX * 0.8) % gridSz + gridSz) % gridSz;
+  const goy = ((-quasiY * 0.8) % gridSz + gridSz) % gridSz;
+  for (let gx = gox; gx < W; gx += gridSz) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, mapH); ctx.stroke(); }
+  for (let gy = goy; gy < mapH; gy += gridSz) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+
+  // Green speed streaks
+  if (spd > 0.5) {
+    for (let i = 0; i < Math.min(3, spd); i++) {
+      hyperTrail.push({
+        x: Math.random() * W, y: Math.random() * mapH,
+        len: 2 + spd * 2, life: 8 + Math.floor(Math.random() * 8),
+        angle: quasiAngle + Math.PI,
+        color: ['#44ff44', '#22cc22', '#66ff66', '#88ffaa'][Math.floor(Math.random() * 4)]
+      });
+    }
+  }
+  for (let i = hyperTrail.length - 1; i >= 0; i--) {
+    const tr = hyperTrail[i];
+    ctx.globalAlpha = tr.life / 16;
+    ctx.strokeStyle = tr.color; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(tr.x, tr.y);
+    ctx.lineTo(tr.x + Math.cos(tr.angle) * tr.len, tr.y + Math.sin(tr.angle) * tr.len);
+    ctx.stroke();
+    tr.x += Math.cos(tr.angle) * 2;
+    tr.y += Math.sin(tr.angle) * 2;
+    tr.life--;
+    if (tr.life <= 0) hyperTrail.splice(i, 1);
+  }
+  ctx.globalAlpha = 1;
+  if (hyperTrail.length > 60) hyperTrail.splice(0, hyperTrail.length - 60);
+
+  // === Draw portals (swirling green/cyan vortexes) ===
+  const qzoom = 0.7;
+  let nearestPortal = null, nearestDist = Infinity;
+  for (let i = 0; i < QUASI_PORTALS.length; i++) {
+    const p = QUASI_PORTALS[i];
+    const px = W / 2 + (p.qx - quasiX) * qzoom;
+    const py = mapH / 2 + (p.qy - quasiY) * qzoom;
+    const d = dist(quasiX, quasiY, p.qx, p.qy);
+    if (d < nearestDist) { nearestDist = d; nearestPortal = i; }
+    if (px < -30 || px > W + 30 || py < -30 || py > mapH + 30) continue;
+
+    // Portal glow
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath(); ctx.arc(px, py, 14, 0, TAU); ctx.fill();
+
+    // Spinning portal rings
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = '#44ffaa'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, 8 + Math.sin(frame * 0.05 + i) * 2, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = '#00cc66'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(px, py, 12 + Math.cos(frame * 0.03 + i * 2) * 3, frame * 0.02 + i, frame * 0.02 + i + Math.PI * 1.3);
+    ctx.stroke();
+
+    // Bright center
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = '#aaffcc';
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Portal label
+    ctx.fillStyle = '#44ff88'; ctx.font = '6px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(p.label, px, py + 20);
+    ctx.textAlign = 'left';
+
+    // Selected portal cursor
+    if (i === nearestPortal && d < 40) {
+      const cr = 16, bLen = 5;
+      ctx.strokeStyle = '#88ffcc'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px - cr, py - cr + bLen); ctx.lineTo(px - cr, py - cr); ctx.lineTo(px - cr + bLen, py - cr);
+      ctx.moveTo(px + cr - bLen, py - cr); ctx.lineTo(px + cr, py - cr); ctx.lineTo(px + cr, py - cr + bLen);
+      ctx.moveTo(px - cr, py + cr - bLen); ctx.lineTo(px - cr, py + cr); ctx.lineTo(px - cr + bLen, py + cr);
+      ctx.moveTo(px + cr - bLen, py + cr); ctx.lineTo(px + cr, py + cr); ctx.lineTo(px + cr, py + cr - bLen);
+      ctx.stroke();
+    }
+  }
+
+  // Player ship
+  const isThrusting = keys['ArrowUp'] || keys['KeyW'];
+  ctx.save();
+  ctx.translate(W / 2, mapH / 2);
+  ctx.rotate(quasiAngle + Math.PI / 2);
+  ctx.scale(0.5, 0.5);
+  SHIP_TYPES.player.draw({ flash: 0, thrusting: isThrusting, def: SHIP_TYPES.player, shieldTimer: 0 });
+  ctx.restore();
+
+  // Thruster
+  if (isThrusting) {
+    ctx.globalAlpha = 0.4 + Math.random() * 0.3;
+    ctx.fillStyle = '#44ff88';
+    const fx = W / 2 - Math.cos(quasiAngle) * 8;
+    const fy = mapH / 2 - Math.sin(quasiAngle) * 8;
+    ctx.beginPath(); ctx.arc(fx, fy, 3 + Math.random() * 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aaffcc';
+    ctx.beginPath(); ctx.arc(fx, fy, 2, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // === QuasiSpace HUD ===
+  ctx.fillStyle = '#0a120a'; ctx.fillRect(0, mapH, W, hudH);
+  ctx.fillStyle = '#228844'; ctx.fillRect(0, mapH, W, 2);
+  ctx.fillStyle = '#114422'; ctx.fillRect(0, mapH + 2, W, 1);
+
+  // Title
+  ctx.fillStyle = '#44ff88'; ctx.font = 'bold 8px monospace';
+  ctx.fillText('QUASISPACE', 4, mapH + 13);
+
+  // Position
+  ctx.fillStyle = '#44aa66'; ctx.font = '7px monospace';
+  ctx.fillText(`POS ${Math.floor(quasiX)},${Math.floor(quasiY)}`, 4, mapH + 25);
+  ctx.fillText(`VEL ${spd.toFixed(1)}`, 4, mapH + 35);
+
+  // Portal info
+  if (nearestPortal !== null && nearestDist < 40) {
+    const p = QUASI_PORTALS[nearestPortal];
+    ctx.fillStyle = '#88ffaa'; ctx.font = '8px monospace';
+    ctx.fillText(`► ${p.label}`, 120, mapH + 13);
+    ctx.fillStyle = '#44aa66'; ctx.font = '7px monospace';
+    ctx.fillText(`DIST ${Math.floor(nearestDist)}`, 120, mapH + 25);
+    if (nearestDist < 25 && Math.floor(frame / 15) % 2) {
+      ctx.fillStyle = '#88ffcc'; ctx.font = '8px monospace';
+      ctx.fillText('ENTER to warp', 120, mapH + 35);
+    }
+  }
+
+  // Fuel/crew/minerals on right side
+  ctx.fillStyle = '#44aa66'; ctx.font = '7px monospace';
+  ctx.fillText('FUEL', 220, mapH + 13);
+  ctx.fillStyle = '#44ff88'; ctx.fillText(fuel.toString(), 248, mapH + 13);
+  ctx.fillStyle = '#44aa66'; ctx.fillText('CREW', 220, mapH + 25);
+  ctx.fillStyle = '#44ff88'; ctx.fillText(`${crew}/${maxCrew}`, 248, mapH + 25);
+  ctx.fillStyle = '#44aa66'; ctx.fillText('RU', 220, mapH + 35);
+  ctx.fillStyle = '#ffcc44'; ctx.fillText(minerals.toString(), 236, mapH + 35);
+
+  // Game message overlay
+  if (messageTimer > 0) {
+    ctx.fillStyle = '#44ff88'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(gameMessage, W / 2, 20);
+    ctx.textAlign = 'left';
+    messageTimer--;
+  }
+}
+
 function drawMap() {
+  if (inQuasiSpace) { drawQuasiSpace(); return; }
+
   const hudH = 40; // SC2 bottom HUD bar (taller, like SC2)
   const mapH = H - hudH; // playable map area
   const spd = Math.hypot(hyperVX, hyperVY);
@@ -3318,6 +3615,25 @@ function drawMap() {
     ctx.fillText('NO STAR NEARBY', 218, mapH + 13);
   }
 
+  // Fleet icons along top right (SC2 showed your fleet)
+  if (fleet.length > 1) {
+    ctx.fillStyle = '#8888aa'; ctx.font = '6px monospace';
+    ctx.fillText('FLEET', W - 58, 8);
+    for (let fi = 0; fi < fleet.length; fi++) {
+      const fDef = SHIP_TYPES[fleet[fi]];
+      if (fDef) {
+        ctx.fillStyle = fDef.color;
+        ctx.fillRect(W - 58 + fi * 9, 10, 7, 7);
+      }
+    }
+  }
+
+  // Autopilot hint
+  if (selectedStar !== null) {
+    ctx.fillStyle = '#334466'; ctx.font = '6px monospace';
+    ctx.fillText('A=autopilot', 218, mapH + 35 - (artifacts > 0 ? 0 : 10));
+  }
+
   // Message overlay
   if (messageTimer > 0) {
     messageTimer--;
@@ -3511,15 +3827,34 @@ function updateStarbase() {
       starbaseMsgTimer = 180;
       sfx.confirm();
     } else if (starbaseCursor === 1) {
-      // Refuel
-      if (fuel < 200) {
-        fuel = 200;
-        starbaseMsg = 'Fuel tanks topped off to 200, Captain!';
-        starbaseMsgTimer = 90;
-        sfx.pickup();
-      } else {
+      // Refuel (SC2: costs 1 mineral per 5 fuel)
+      const fuelNeeded = 200 - fuel;
+      if (fuelNeeded <= 0) {
         starbaseMsg = 'Fuel tanks are already full.';
         starbaseMsgTimer = 60;
+      } else {
+        const cost = Math.ceil(fuelNeeded / 5);
+        if (minerals >= cost) {
+          minerals -= cost;
+          fuel = 200;
+          starbaseMsg = `Fuel topped off! (-${cost} RU)`;
+          starbaseMsgTimer = 90;
+          sfx.pickup();
+        } else {
+          // Partial refuel with what we can afford
+          const canBuy = minerals * 5;
+          if (canBuy > 0) {
+            fuel = Math.min(200, fuel + canBuy);
+            starbaseMsg = `+${canBuy} fuel (-${minerals} RU)`;
+            minerals = 0;
+            starbaseMsgTimer = 90;
+            sfx.pickup();
+          } else {
+            starbaseMsg = 'Need minerals to buy fuel! (1 RU = 5 fuel)';
+            starbaseMsgTimer = 90;
+            sfx.alarm();
+          }
+        }
       }
     } else if (starbaseCursor === 2) {
       // Recruit crew (10 minerals per 5 crew)
@@ -3675,7 +4010,7 @@ function drawStarbase() {
   // Menu options (SC2 style - centered, highlighted)
   const menuItems = [
     'TALK TO COMMANDER',
-    `REFUEL STARSHIP [${fuel}/200]`,
+    `REFUEL (1 RU = 5 fuel) [${fuel}/200]`,
     `RECRUIT CREW (10 RU) [${crew}/${maxCrew}]`,
     `OUTFIT MODULES [${modules.length}/${MAX_MODULES}]`,
     'DEPART STARBASE',
@@ -4087,6 +4422,15 @@ function updateDialogue() {
           messageTimer = 60;
         }
         returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'quasispace') {
+        // Enter QuasiSpace!
+        inQuasiSpace = true;
+        quasiX = 0; quasiY = 0; quasiVX = 0; quasiVY = 0;
+        quasiAngle = -Math.PI / 2;
+        state = 'map';
+        gameMessage = 'Entered QuasiSpace!';
+        messageTimer = 120;
+        sfx.warp();
       } else if (act === 'flee') {
         returnToHyperSpace(); sfx.warp();
       } else {
