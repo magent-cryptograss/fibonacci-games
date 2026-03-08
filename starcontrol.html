@@ -1,0 +1,3193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>STAR CONTROL</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+canvas { image-rendering: pixelated; border: 2px solid #222; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<canvas id="buffer" style="display:none"></canvas>
+<script>
+// ==================== SETUP ====================
+const SNES_W = 320, SNES_H = 224, SCALE = 3;
+const canvas = document.getElementById('game');
+canvas.width = SNES_W * SCALE; canvas.height = SNES_H * SCALE;
+const displayCtx = canvas.getContext('2d');
+displayCtx.imageSmoothingEnabled = false;
+const buffer = document.getElementById('buffer');
+buffer.width = SNES_W; buffer.height = SNES_H;
+const ctx = buffer.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const W = SNES_W, H = SNES_H;
+
+// ==================== SOUND ====================
+const sfx = (() => {
+  let audioCtx = null;
+  function getCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+  document.addEventListener('keydown', () => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    // Also resume music context
+    if (music && music._getCtx) {
+      const mc = music._getCtx();
+      if (mc && mc.state === 'suspended') mc.resume();
+    }
+  }, { once: false });
+  function tone(freq, dur, type, vol, slide) {
+    const c = getCtx(), t = c.currentTime;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type || 'square'; o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.linearRampToValueAtTime(slide, t + dur);
+    g.gain.setValueAtTime(vol || 0.08, t);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + dur);
+  }
+  function noise(dur, vol) {
+    const c = getCtx(), t = c.currentTime;
+    const buf = c.createBuffer(1, c.sampleRate * dur, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource(), g = c.createGain();
+    src.buffer = buf; g.gain.setValueAtTime(vol || 0.06, t);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    src.connect(g); g.connect(c.destination); src.start(t);
+  }
+  return {
+    shoot()   { tone(800, 0.08, 'square', 0.15, 200); },
+    laser()   { tone(1200, 0.1, 'sawtooth', 0.12, 600); },
+    hit()     { noise(0.08, 0.15); tone(200, 0.1, 'square', 0.12, 80); },
+    explode() { noise(0.4, 0.2); tone(100, 0.25, 'sawtooth', 0.15, 30); },
+    thrust()  { noise(0.04, 0.05); },
+    shield()  { tone(600, 0.2, 'triangle', 0.12, 800); },
+    select()  { tone(500, 0.05, 'square', 0.1, 700); },
+    confirm() { tone(400, 0.06, 'square', 0.12); setTimeout(() => tone(600, 0.1, 'square', 0.12), 60); },
+    scan()    { tone(1000, 0.35, 'triangle', 0.1, 2000); },
+    warp()    { tone(80, 0.5, 'sawtooth', 0.15, 400); noise(0.25, 0.1); },
+    pickup()  { tone(600, 0.06, 'square', 0.12, 900); },
+    alarm()   { tone(300, 0.2, 'square', 0.12, 100); },
+    victory() { [400,500,600,800].forEach((f,i) => setTimeout(() => tone(f, 0.2, 'square', 0.14), i * 100)); },
+    defeat()  { tone(300, 0.2, 'square', 0.14, 100); setTimeout(() => tone(150, 0.35, 'sawtooth', 0.14, 50), 200); },
+    // SC2-style alien voice synth — each race has a distinctive vocal pattern
+    alienVoice(race) {
+      const voices = {
+        urquan:    { base: 120, range: 40, type: 'sawtooth', speed: 80, vol: 0.07 }, // deep, authoritative
+        spathi:    { base: 500, range: 200, type: 'square', speed: 40, vol: 0.06 }, // high, panicky
+        chmmr:     { base: 300, range: 100, type: 'sine', speed: 100, vol: 0.05 }, // calm, crystalline
+        zoqfotpik: { base: 400, range: 300, type: 'square', speed: 35, vol: 0.06 }, // chattery, fast
+        orz:       { base: 250, range: 150, type: 'triangle', speed: 50, vol: 0.07 }, // eerie, warbling
+        mycon:     { base: 100, range: 60, type: 'sawtooth', speed: 120, vol: 0.06 }, // slow, deep, fungal
+        pkunk:     { base: 350, range: 180, type: 'triangle', speed: 55, vol: 0.05 }, // melodic, birdy
+        melnorme:  { base: 200, range: 80, type: 'sine', speed: 70, vol: 0.06 }, // smooth, merchant
+        human:     { base: 180, range: 60, type: 'sawtooth', speed: 65, vol: 0.05 }, // normal
+      };
+      const v = voices[race] || voices.human;
+      const syllables = 3 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < syllables; i++) {
+        const f = v.base + (Math.random() - 0.5) * v.range;
+        const f2 = f + (Math.random() - 0.5) * v.range * 0.5;
+        setTimeout(() => tone(f, 0.06 + Math.random() * 0.04, v.type, v.vol, f2), i * v.speed);
+      }
+    },
+  };
+})();
+
+// ==================== MUSIC ====================
+const music = (() => {
+  let audioCtx = null, loopTimer = null, currentTrack = null, masterGain = null, oscs = [];
+  function getCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!masterGain) { masterGain = audioCtx.createGain(); masterGain.gain.value = 0.12; masterGain.connect(audioCtx.destination); }
+    return audioCtx;
+  }
+  function stop() {
+    if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+    for (const o of oscs) try { o.stop(); } catch(e) {}
+    oscs = []; currentTrack = null;
+  }
+  const N = { C2:65,D2:73,E2:82,F2:87,G2:98,A2:110,B2:123,C3:131,D3:147,E3:165,F3:175,Fs3:185,G3:196,A3:220,Bb3:233,B3:247,C4:262,Cs4:277,D4:294,Ds4:311,Eb4:311,E4:330,F4:349,Fs4:370,Gb4:370,G4:392,Gs4:415,Ab4:415,A4:440,Bb4:466,B4:494,C5:523,Cs5:554,D5:587,Ds5:622,Eb5:622,E5:659,F5:698,Fs5:740,G5:784,Gs5:831,A5:880,Bb5:932,B5:988,R:0 };
+  const TRACKS = {
+    // SC2 Title - epic, sweeping, heroic feel like the SC2 intro
+    title: { tempo: 110, type: 'triangle',
+      bass: [[N.C3,1],[N.G3,0.5],[N.C3,0.5],[N.E3,1],[N.G3,0.5],[N.C3,0.5],
+             [N.F3,1],[N.C3,0.5],[N.F3,0.5],[N.G3,1],[N.G3,0.5],[N.B3,0.5]],
+      lead: [[N.C5,1],[N.E5,0.5],[N.G5,1],[N.E5,0.5],[N.C5,0.5],[N.D5,0.5],
+             [N.E5,1],[N.D5,0.5],[N.C5,0.5],[N.B4,0.5],[N.A4,0.5],
+             [N.G4,1],[N.A4,0.5],[N.B4,0.5],[N.C5,1.5],[N.R,0.5],
+             [N.A4,0.5],[N.B4,0.5],[N.C5,1],[N.E5,0.5],[N.D5,0.5],
+             [N.C5,0.5],[N.B4,0.5],[N.A4,1],[N.G4,1],[N.R,1]]
+    },
+    // SC2 HyperSpace - mysterious, spacey, floating arpeggios
+    map: { tempo: 95, type: 'triangle',
+      bass: [[N.A2,1.5],[N.E3,0.5],[N.A2,1],[N.R,0.5],[N.A2,0.5],
+             [N.D3,1.5],[N.A3,0.5],[N.D3,1],[N.R,0.5],[N.D3,0.5],
+             [N.F3,1.5],[N.C3,0.5],[N.F3,1],[N.E3,0.5],[N.D3,0.5]],
+      lead: [[N.A4,0.5],[N.C5,0.5],[N.E5,0.5],[N.A5,0.5],[N.E5,0.5],[N.C5,0.5],
+             [N.D5,0.5],[N.F5,0.5],[N.A5,0.5],[N.F5,0.5],[N.D5,0.5],[N.R,0.5],
+             [N.C5,0.5],[N.E5,0.5],[N.G5,0.5],[N.E5,0.5],[N.C5,0.5],[N.B4,0.5],
+             [N.A4,1],[N.R,0.5],[N.E4,0.5],[N.A4,1],[N.R,1]]
+    },
+    // SC2 Melee combat - driving, aggressive, fast like Ur-Quan battle
+    combat: { tempo: 180, type: 'sawtooth',
+      bass: [[N.E3,0.5],[N.E3,0.25],[N.E3,0.25],[N.G3,0.5],[N.E3,0.5],
+             [N.A3,0.5],[N.G3,0.25],[N.A3,0.25],[N.B3,0.5],[N.E3,0.5],
+             [N.C3,0.5],[N.C3,0.25],[N.C3,0.25],[N.E3,0.5],[N.G3,0.5],
+             [N.A3,0.5],[N.B3,0.5],[N.E3,0.5],[N.E3,0.5]],
+      lead: [[N.E5,0.25],[N.R,0.25],[N.E5,0.25],[N.G5,0.25],[N.A5,0.5],[N.G5,0.5],
+             [N.E5,0.5],[N.D5,0.25],[N.E5,0.25],[N.G5,0.5],[N.R,0.5],
+             [N.A5,0.25],[N.R,0.25],[N.A5,0.25],[N.B5,0.25],[N.A5,0.5],[N.G5,0.5],
+             [N.E5,0.5],[N.G5,0.5],[N.E5,0.5],[N.D5,0.5],
+             [N.E5,1],[N.R,0.5],[N.B4,0.25],[N.D5,0.25]]
+    },
+    // SC2 Conversation - eerie, alien, mysterious
+    dialogue: { tempo: 80, type: 'triangle',
+      bass: [[N.D3,1.5],[N.A3,0.5],[N.Bb3,1],[N.A3,1],
+             [N.G3,1.5],[N.D3,0.5],[N.F3,1],[N.E3,0.5],[N.D3,0.5]],
+      lead: [[N.D5,1],[N.R,0.5],[N.F5,0.5],[N.A5,1],[N.G5,0.5],[N.F5,0.5],
+             [N.E5,0.5],[N.D5,0.5],[N.R,0.5],[N.A4,0.5],
+             [N.Bb4,1],[N.A4,0.5],[N.G4,0.5],[N.A4,1],[N.R,1],
+             [N.D5,0.5],[N.E5,0.5],[N.F5,1],[N.E5,0.5],[N.D5,0.5],[N.Cs5,1],[N.R,1]]
+    },
+    // SC2 Boss (Orz) - menacing, heavy, interdimensional feel
+    boss: { tempo: 160, type: 'sawtooth',
+      bass: [[N.C3,0.5],[N.C3,0.25],[N.Ds4,0.25],[N.C3,0.5],[N.G3,0.5],
+             [N.Gs4,0.5],[N.G3,0.25],[N.C3,0.25],[N.Ds4,0.5],[N.C3,0.5],
+             [N.C3,0.5],[N.Ds4,0.5],[N.F3,0.5],[N.G3,0.5],
+             [N.Gs4,0.5],[N.G3,0.5],[N.F3,0.5],[N.Ds4,0.5]],
+      lead: [[N.C5,0.5],[N.Ds5,0.5],[N.G5,0.5],[N.Gs5,0.25],[N.G5,0.25],
+             [N.Ds5,0.5],[N.C5,0.5],[N.R,0.5],[N.G4,0.5],
+             [N.Gs4,0.5],[N.R,0.25],[N.Gs4,0.25],[N.G5,0.5],[N.Ds5,0.5],
+             [N.C5,0.5],[N.Ds5,0.5],[N.C5,1],
+             [N.R,0.5],[N.G4,0.25],[N.Gs4,0.25],[N.C5,0.5],[N.Ds5,0.5]]
+    },
+  };
+  function play(name) {
+    if (currentTrack === name) return;
+    stop(); currentTrack = name;
+    const tr = TRACKS[name]; if (!tr) return;
+    const c = getCtx(); if (c.state === 'suspended') return;
+    let bi = 0, li = 0, bt = c.currentTime + 0.1, lt = c.currentTime + 0.1;
+    const bl = 60 / tr.tempo;
+    function sched() {
+      const now = c.currentTime;
+      while (bt < now + 2) {
+        const [f,d] = tr.bass[bi % tr.bass.length];
+        if (f > 0) { const o = c.createOscillator(), g = c.createGain(); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.5, bt); g.gain.linearRampToValueAtTime(0, bt+d*bl*0.9); o.connect(g); g.connect(masterGain); o.start(bt); o.stop(bt+d*bl); oscs.push(o); }
+        bt += d * bl; bi++;
+      }
+      while (lt < now + 2) {
+        const [f,d] = tr.lead[li % tr.lead.length];
+        if (f > 0) { const o = c.createOscillator(), g = c.createGain(); o.type = tr.type || 'triangle'; o.frequency.value = f; g.gain.setValueAtTime(0.4, lt); g.gain.linearRampToValueAtTime(0, lt+d*bl*0.85); o.connect(g); g.connect(masterGain); o.start(lt); o.stop(lt+d*bl); oscs.push(o); }
+        lt += d * bl; li++;
+      }
+      if (oscs.length > 80) oscs.splice(0, 40);
+    }
+    sched(); loopTimer = setInterval(sched, 500);
+  }
+  return { play, stop, _getCtx: getCtx };
+})();
+
+// ==================== INPUT ====================
+const keys = {}, justPressed = {};
+document.addEventListener('keydown', e => {
+  if (!keys[e.code]) justPressed[e.code] = true;
+  keys[e.code] = true; e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; e.preventDefault(); });
+
+// ==================== CONSTANTS ====================
+const TAU = Math.PI * 2;
+const MAP_SIZE = 2000;
+const GRAVITY_STRENGTH = 800;
+const PLANET_RADIUS = 18;
+
+// ==================== GAME STATE ====================
+let state = 'title';
+let frame = 0;
+let playerShip, enemyShip;
+let projectiles, particles, combatPlanet;
+let starMap, nearestStar, selectedStar;
+let mapCamX, mapCamY;
+let dialogue, dialogueChoice;
+let gameMessage, messageTimer;
+
+// Player persistent state
+let fuel, minerals, crew, maxCrew;
+let artifacts;
+// HyperSpace travel state
+let hyperX, hyperY, hyperVX, hyperVY, hyperAngle, hyperDest;
+let hyperEncounterTimer;
+let modules; // array of installed module names
+const MODULE_DEFS = [
+  { name: 'Fusion Blaster', desc: 'Weapon damage +2', cost: 30, stat: 'weapon', val: 2, icon: '#ff4444' },
+  { name: 'Hellbore Cannon', desc: 'Weapon damage +4', cost: 80, stat: 'weapon', val: 4, icon: '#ff6644' },
+  { name: 'Turning Jets', desc: 'Turn speed +50%', cost: 25, stat: 'turn', val: 0.02, icon: '#44aaff' },
+  { name: 'Afterburner', desc: 'Max speed +1.5', cost: 35, stat: 'speed', val: 1.5, icon: '#ffaa22' },
+  { name: 'Ion Drive', desc: 'Thrust +0.15', cost: 40, stat: 'thrust', val: 0.15, icon: '#22ddff' },
+  { name: 'Crew Pod', desc: 'Crew capacity +8', cost: 20, stat: 'crew', val: 8, icon: '#44ff44' },
+  { name: 'Hi-Eff Fuel Tank', desc: 'Fuel capacity +50', cost: 25, stat: 'fuel', val: 50, icon: '#ffcc44' },
+  { name: 'Shiva Furnace', desc: 'Fire rate +30%', cost: 50, stat: 'firerate', val: 0.7, icon: '#ff8844' },
+  { name: 'Point Defense', desc: 'Auto-destroy nearby shots', cost: 60, stat: 'pointdef', val: 1, icon: '#aaaaff' },
+  { name: 'Dynamo Unit', desc: 'Energy recharge +50%', cost: 45, stat: 'energy', val: 0.5, icon: '#88ffaa' },
+];
+let visitedStars;
+let defeatedAliens;
+let currentStarIdx;
+
+// ==================== UTILITY ====================
+function dist(x1, y1, x2, y2) { return Math.sqrt((x2-x1)**2 + (y2-y1)**2); }
+function angleTo(x1, y1, x2, y2) { return Math.atan2(y2-y1, x2-x1); }
+function normAngle(a) { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function rng(seed) { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ==================== PARTICLES ====================
+class Particle {
+  constructor(x, y, vx, vy, color, life) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.color = color; this.life = life; this.maxLife = life;
+  }
+  update() { this.x += this.vx; this.y += this.vy; this.life--; }
+  draw(ox, oy) {
+    ctx.globalAlpha = this.life / this.maxLife;
+    ctx.fillStyle = this.color;
+    const sz = Math.max(1, Math.floor(2 * this.life / this.maxLife));
+    ctx.fillRect(this.x - ox, this.y - oy, sz, sz);
+    ctx.globalAlpha = 1;
+  }
+}
+function spawnParticles(x, y, color, count, speed) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * TAU, s = (speed || 3) * Math.random();
+    particles.push(new Particle(x, y, Math.cos(a)*s, Math.sin(a)*s, color, 15 + Math.random() * 20));
+  }
+}
+
+// ==================== SHIP TYPES ====================
+const SHIP_TYPES = {
+  player: {
+    name: 'Vindicator', race: 'Human (Alliance)',
+    color: '#22aaaa', accent: '#44cccc', dark: '#116666',
+    turnSpeed: 0.07, thrust: 0.25, maxSpeed: 5, drag: 0.995,
+    maxCrew: 20, maxEnergy: 100, energyRegen: 0.4,
+    weapon: { type: 'laser', damage: 2, speed: 8, rate: 8, cost: 5, color: '#88ccff', size: 3 },
+    special: { name: 'Shield', cost: 30, duration: 60 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // === Precursor Flagship / Vindicator (SC2 style) ===
+      // Main hull - long central body
+      ctx.fillStyle = f ? '#fff' : '#0a4444';
+      ctx.fillRect(-4, -14, 8, 26);
+      ctx.fillStyle = f ? '#fff' : '#116666';
+      ctx.fillRect(-3, -13, 6, 24);
+      ctx.fillStyle = f ? '#fff' : '#22aaaa';
+      ctx.fillRect(-2, -12, 4, 22);
+      // Nose - pointed front section
+      ctx.fillStyle = f ? '#fff' : '#116666';
+      ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-4, -12); ctx.lineTo(4, -12); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#22aaaa';
+      ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(-3, -12); ctx.lineTo(3, -12); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#44cccc';
+      ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(-1, -12); ctx.lineTo(1, -12); ctx.fill();
+      // Nose tip highlight
+      ctx.fillStyle = f ? '#fff' : '#66dddd';
+      ctx.fillRect(-1, -15, 2, 2);
+      // Hull panel lines
+      ctx.fillStyle = f ? '#fff' : '#0a4444';
+      ctx.fillRect(-3, -6, 6, 1);
+      ctx.fillRect(-3, 2, 6, 1);
+      // Hull highlight stripe
+      ctx.fillStyle = f ? '#fff' : '#44cccc';
+      ctx.fillRect(-1, -11, 2, 18);
+      // Side module pods (left)
+      ctx.fillStyle = f ? '#fff' : '#0a4444';
+      ctx.fillRect(-10, -4, 6, 10);
+      ctx.fillStyle = f ? '#fff' : '#116666';
+      ctx.fillRect(-9, -3, 4, 8);
+      ctx.fillStyle = f ? '#fff' : '#22aaaa';
+      ctx.fillRect(-8, -2, 2, 6);
+      // Side module pods (right)
+      ctx.fillStyle = f ? '#fff' : '#0a4444';
+      ctx.fillRect(4, -4, 6, 10);
+      ctx.fillStyle = f ? '#fff' : '#116666';
+      ctx.fillRect(5, -3, 4, 8);
+      ctx.fillStyle = f ? '#fff' : '#22aaaa';
+      ctx.fillRect(6, -2, 2, 6);
+      // Pod connectors (struts)
+      ctx.fillStyle = f ? '#fff' : '#0a4444';
+      ctx.fillRect(-5, -1, 2, 3);
+      ctx.fillRect(3, -1, 2, 3);
+      // Engine block - wide rear section
+      ctx.fillStyle = f ? '#fff' : '#0a4444';
+      ctx.fillRect(-6, 10, 12, 6);
+      ctx.fillStyle = f ? '#fff' : '#116666';
+      ctx.fillRect(-5, 11, 10, 4);
+      // Engine nozzles (3 thrusters)
+      ctx.fillStyle = f ? '#fff' : '#083333';
+      ctx.fillRect(-5, 15, 3, 2);
+      ctx.fillRect(-1, 15, 3, 2);
+      ctx.fillRect(3, 15, 3, 2);
+      // Cockpit window
+      ctx.fillStyle = f ? '#fff' : '#88eeff';
+      ctx.fillRect(-2, -10, 4, 3);
+      ctx.fillStyle = f ? '#fff' : '#aaf4ff';
+      ctx.fillRect(-1, -9, 2, 1);
+      // Turret mount on top
+      ctx.fillStyle = f ? '#fff' : '#44cccc';
+      ctx.fillRect(-1, -12, 2, 2);
+      // Pod details - sensor dots
+      if (!f) {
+        ctx.fillStyle = '#44dddd';
+        ctx.fillRect(-8, -1, 1, 1);
+        ctx.fillRect(7, -1, 1, 1);
+        ctx.fillStyle = '#22aaaa';
+        ctx.fillRect(-8, 3, 1, 1);
+        ctx.fillRect(7, 3, 1, 1);
+      }
+      // Thruster glow (3 engines)
+      if (ship.thrusting) {
+        const flicker = Math.random() * 3;
+        ctx.fillStyle = '#ff8844';
+        ctx.fillRect(-5, 17, 3, 3 + flicker);
+        ctx.fillRect(-1, 17, 3, 4 + flicker);
+        ctx.fillRect(3, 17, 3, 3 + flicker);
+        ctx.fillStyle = '#ffcc88';
+        ctx.fillRect(-4, 17, 1, 2);
+        ctx.fillRect(0, 17, 1, 3);
+        ctx.fillRect(4, 17, 1, 2);
+        // Outer engine trails
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#ff6622';
+        ctx.fillRect(-5, 20, 3, 2 + flicker);
+        ctx.fillRect(3, 20, 3, 2 + flicker);
+        ctx.globalAlpha = 1;
+      }
+      // Shield bubble
+      if (ship.shieldTimer > 0) {
+        ctx.globalAlpha = 0.3 + Math.sin(frame * 0.2) * 0.1;
+        ctx.strokeStyle = '#44ffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, 20, 0, TAU); ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 1;
+      }
+    },
+  },
+  urquan: {
+    name: 'Dreadnought', race: 'Ur-Quan',
+    color: '#44aa44', accent: '#66dd66', dark: '#226622',
+    turnSpeed: 0.06, thrust: 0.3, maxSpeed: 5.5, drag: 0.993,
+    maxCrew: 18, maxEnergy: 80, energyRegen: 0.5,
+    weapon: { type: 'laser', damage: 3, speed: 8, rate: 12, cost: 6, color: '#ff4444', size: 4 },
+    special: { name: 'Fighters', cost: 15, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // === Ur-Quan Dreadnought - large caterpillar/segmented body ===
+      // Wide front segment (head)
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-8, -14, 16, 6);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-7, -13, 14, 4);
+      // Front nose taper
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(-6, -14); ctx.lineTo(0, -18); ctx.lineTo(6, -14); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(-4, -14); ctx.lineTo(0, -16); ctx.lineTo(4, -14); ctx.fill();
+      // Head bridge window
+      ctx.fillStyle = f ? '#fff' : '#88ff88';
+      ctx.fillRect(-3, -13, 6, 2);
+      ctx.fillStyle = f ? '#fff' : '#aaffaa';
+      ctx.fillRect(-2, -13, 4, 1);
+      // Segment 2
+      ctx.fillStyle = f ? '#fff' : '#1a5522';
+      ctx.fillRect(-7, -8, 14, 1);
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-7, -7, 14, 5);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-6, -6, 12, 3);
+      // Segment 3
+      ctx.fillStyle = f ? '#fff' : '#1a5522';
+      ctx.fillRect(-6, -2, 12, 1);
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-6, -1, 12, 5);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-5, 0, 10, 3);
+      // Segment 4 (rear, narrower)
+      ctx.fillStyle = f ? '#fff' : '#1a5522';
+      ctx.fillRect(-5, 4, 10, 1);
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-5, 5, 10, 5);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-4, 6, 8, 3);
+      // Fighter bay pods (left)
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-12, -10, 4, 8);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-11, -9, 2, 6);
+      // Fighter bay opening
+      ctx.fillStyle = f ? '#fff' : '#1a3311';
+      ctx.fillRect(-11, -7, 2, 2);
+      // Fighter bay pods (right)
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(8, -10, 4, 8);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(9, -9, 2, 6);
+      ctx.fillStyle = f ? '#fff' : '#1a3311';
+      ctx.fillRect(9, -7, 2, 2);
+      // Bay strut connectors
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-8, -8, 1, 4);
+      ctx.fillRect(7, -8, 1, 4);
+      // Segment detail - green highlights
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-1, -12, 2, 1);
+      ctx.fillRect(-1, -5, 2, 1);
+      ctx.fillRect(-1, 1, 2, 1);
+      ctx.fillRect(-1, 7, 2, 1);
+      // Engine nozzles at rear
+      ctx.fillStyle = f ? '#fff' : '#1a3311';
+      ctx.fillRect(-4, 10, 3, 2);
+      ctx.fillRect(1, 10, 3, 2);
+      // Thruster flames
+      if (ship.thrusting) {
+        const flicker = Math.random() * 3;
+        ctx.fillStyle = '#44ff44';
+        ctx.fillRect(-4, 12, 3, 3 + flicker);
+        ctx.fillRect(1, 12, 3, 3 + flicker);
+        ctx.fillStyle = '#88ff88';
+        ctx.fillRect(-3, 12, 1, 2);
+        ctx.fillRect(2, 12, 1, 2);
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#22cc22';
+        ctx.fillRect(-4, 15, 3, 2 + flicker);
+        ctx.fillRect(1, 15, 3, 2 + flicker);
+        ctx.globalAlpha = 1;
+      }
+    },
+  },
+  spathi: {
+    name: 'Eluder', race: 'Spathi',
+    color: '#dd8844', accent: '#ffaa66', dark: '#885522',
+    turnSpeed: 0.04, thrust: 0.15, maxSpeed: 3.5, drag: 0.997,
+    maxCrew: 30, maxEnergy: 120, energyRegen: 0.3,
+    weapon: { type: 'spread', damage: 1, speed: 6, rate: 15, cost: 8, color: '#66ff88', size: 2 },
+    special: { name: 'Heal', cost: 40, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // === Spathi Eluder - clam/mollusk shell, facing backwards ===
+      // Outer shell (top half - the shell dome)
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, 0, 11, Math.PI, TAU); ctx.fill();
+      // Inner shell color
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, 0, 9, Math.PI, TAU); ctx.fill();
+      // Shell ridges (concentric arcs)
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(0, 1, 7, Math.PI + 0.3, TAU - 0.3); ctx.lineTo(0, 1); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, 2, 5, Math.PI + 0.4, TAU - 0.4); ctx.lineTo(0, 2); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(0, 3, 3, Math.PI + 0.5, TAU - 0.5); ctx.lineTo(0, 3); ctx.fill();
+      // Bottom half - soft body
+      ctx.fillStyle = f ? '#fff' : '#cc9966';
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#ddaa77';
+      ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI); ctx.fill();
+      // Shell lip / edge highlight
+      ctx.fillStyle = f ? '#fff' : '#eebb77';
+      ctx.fillRect(-10, -1, 20, 2);
+      // Scared eye (looking backwards/up)
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(-3, 3, 2.5, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(3, 3, 2.5, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#111';
+      ctx.beginPath(); ctx.arc(-3, 4, 1.2, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(3, 4, 1.2, 0, TAU); ctx.fill();
+      // Rear-firing weapon tube (pointing backward / down in ship coords)
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-2, 8, 4, 4);
+      ctx.fillStyle = f ? '#fff' : '#996633';
+      ctx.fillRect(-1, 9, 2, 3);
+      // Shell top detail (bump)
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, -6, 3, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(0, -6, 2, 0, TAU); ctx.fill();
+      // Thruster (reluctant, small)
+      if (ship.thrusting) {
+        const flicker = Math.random() * 2;
+        ctx.fillStyle = '#ffaa44';
+        ctx.fillRect(-3, -11, 2, 2 + flicker);
+        ctx.fillRect(1, -11, 2, 2 + flicker);
+        ctx.fillStyle = '#ffcc88';
+        ctx.fillRect(-2, -11, 1, 1);
+        ctx.fillRect(2, -11, 1, 1);
+      }
+    },
+  },
+  chmmr: {
+    name: 'Avatar', race: 'Chmmr',
+    color: '#88aadd', accent: '#aaccff', dark: '#4466aa',
+    turnSpeed: 0.03, thrust: 0.1, maxSpeed: 2.5, drag: 0.998,
+    maxCrew: 40, maxEnergy: 60, energyRegen: 0.2,
+    weapon: { type: 'beam', damage: 4, speed: 12, rate: 25, cost: 15, color: '#ccccff', size: 4 },
+    special: { name: 'Gravity Bomb', cost: 30, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // === Chmmr Avatar - crystal/diamond geometric ship ===
+      // Outer diamond hull
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath();
+      ctx.moveTo(0, -14); ctx.lineTo(-10, -2); ctx.lineTo(-8, 8); ctx.lineTo(0, 12); ctx.lineTo(8, 8); ctx.lineTo(10, -2);
+      ctx.closePath(); ctx.fill();
+      // Inner diamond
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -12); ctx.lineTo(-8, -2); ctx.lineTo(-6, 7); ctx.lineTo(0, 10); ctx.lineTo(6, 7); ctx.lineTo(8, -2);
+      ctx.closePath(); ctx.fill();
+      // Crystal facet lines (left)
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-8, -2); ctx.lineTo(-4, -2); ctx.lineTo(0, -10); ctx.fill();
+      // Crystal facet lines (right)
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(8, -2); ctx.lineTo(4, -2); ctx.lineTo(0, -10); ctx.fill();
+      // Lower facets
+      ctx.fillStyle = f ? '#fff' : '#6688bb';
+      ctx.beginPath(); ctx.moveTo(-6, 7); ctx.lineTo(0, 10); ctx.lineTo(0, 4); ctx.lineTo(-4, 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(6, 7); ctx.lineTo(0, 10); ctx.lineTo(0, 4); ctx.lineTo(4, 4); ctx.fill();
+      // Central crystal core (tractor beam emitter)
+      ctx.fillStyle = f ? '#fff' : '#bbccff';
+      ctx.beginPath(); ctx.arc(0, -3, 4, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#ddeeff';
+      ctx.beginPath(); ctx.arc(0, -3, 2, 0, TAU); ctx.fill();
+      // Crystal edge highlights
+      ctx.fillStyle = f ? '#fff' : '#aaccff';
+      ctx.fillRect(-1, -11, 2, 3);
+      ctx.fillRect(-7, -2, 2, 1);
+      ctx.fillRect(5, -2, 2, 1);
+      // Satellite orbs (Chmmr have orbiting zappers)
+      if (!f) {
+        const orb1 = frame * 0.04;
+        const orb2 = frame * 0.04 + Math.PI;
+        ctx.fillStyle = '#ccddff';
+        ctx.beginPath(); ctx.arc(Math.cos(orb1) * 12, Math.sin(orb1) * 12, 2, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(Math.cos(orb2) * 12, Math.sin(orb2) * 12, 2, 0, TAU); ctx.fill();
+      }
+      // Engine glow
+      if (ship.thrusting) {
+        const flicker = Math.random() * 2;
+        ctx.fillStyle = '#8888ff';
+        ctx.fillRect(-3, 10, 6, 3 + flicker);
+        ctx.fillStyle = '#aaaaff';
+        ctx.fillRect(-1, 10, 2, 2);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#6666cc';
+        ctx.fillRect(-2, 13, 4, 2 + flicker);
+        ctx.globalAlpha = 1;
+      }
+    },
+  },
+  zoqfotpik: {
+    name: 'Stinger', race: 'Zoq-Fot-Pik',
+    color: '#cc6622', accent: '#ee8844', dark: '#884411',
+    turnSpeed: 0.1, thrust: 0.35, maxSpeed: 7, drag: 0.99,
+    maxCrew: 8, maxEnergy: 60, energyRegen: 0.6,
+    weapon: { type: 'scatter', damage: 1, speed: 7, rate: 4, cost: 2, color: '#ffff44', size: 2 },
+    special: { name: 'Drone', cost: 25, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // === Zoq-Fot-Pik Stinger - small stubby ship with tongue spike ===
+      // Main stubby body
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-5, -5, 10, 12);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-4, -4, 8, 10);
+      // Rounded front
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, -5, 5, Math.PI, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, -5, 4, Math.PI, TAU); ctx.fill();
+      // Body highlight
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.fillRect(-2, -3, 4, 6);
+      // Tongue/spike weapon extending from front
+      ctx.fillStyle = f ? '#fff' : '#ff6633';
+      ctx.fillRect(-1, -11, 2, 6);
+      ctx.fillStyle = f ? '#fff' : '#ff4422';
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(-1, -11); ctx.lineTo(1, -11); ctx.fill();
+      // Stubby side fins
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-8, 0, 4, 5);
+      ctx.fillRect(4, 0, 4, 5);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-7, 1, 2, 3);
+      ctx.fillRect(5, 1, 2, 3);
+      // Cockpit canopy
+      ctx.fillStyle = f ? '#fff' : '#ffdd88';
+      ctx.beginPath(); ctx.arc(0, -5, 2, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : '#ffeeaa';
+      ctx.fillRect(-1, -6, 2, 1);
+      // Rear engine plate
+      ctx.fillStyle = f ? '#fff' : '#663311';
+      ctx.fillRect(-4, 7, 8, 2);
+      // Thruster
+      if (ship.thrusting) {
+        const flicker = Math.random() * 2;
+        ctx.fillStyle = '#ffff00';
+        ctx.fillRect(-2, 9, 4, 2 + flicker);
+        ctx.fillStyle = '#ffaa00';
+        ctx.fillRect(-3, 9, 2, 1 + flicker);
+        ctx.fillRect(1, 9, 2, 1 + flicker);
+      }
+    },
+  },
+  orz: {
+    name: 'Nemesis', race: 'Orz',
+    color: '#33ccaa', accent: '#55eebb', dark: '#118866',
+    turnSpeed: 0.05, thrust: 0.2, maxSpeed: 4, drag: 0.996,
+    maxCrew: 50, maxEnergy: 150, energyRegen: 0.3,
+    weapon: { type: 'homing', damage: 3, speed: 5, rate: 20, cost: 12, color: '#cc66ff', size: 3 },
+    special: { name: 'Teleport', cost: 40, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // === Orz Nemesis - angular marine/fish hull with rotating turret ===
+      // Main pentagon hull
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath();
+      ctx.moveTo(0, -10); ctx.lineTo(-11, -3); ctx.lineTo(-8, 10); ctx.lineTo(8, 10); ctx.lineTo(11, -3);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -8); ctx.lineTo(-9, -2); ctx.lineTo(-6, 8); ctx.lineTo(6, 8); ctx.lineTo(9, -2);
+      ctx.closePath(); ctx.fill();
+      // Hull panel detail
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(-4, 0); ctx.lineTo(4, 0); ctx.fill();
+      // Side armor plates
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-11, -3, 3, 6);
+      ctx.fillRect(8, -3, 3, 6);
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.fillRect(-10, -2, 1, 4);
+      ctx.fillRect(9, -2, 1, 4);
+      // Marine fin details (angular fins)
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(-9, -3); ctx.lineTo(-14, -6); ctx.lineTo(-11, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(9, -3); ctx.lineTo(14, -6); ctx.lineTo(11, 0); ctx.fill();
+      // Rotating turret on top
+      const turretAngle = frame * 0.05;
+      ctx.fillStyle = f ? '#fff' : '#228866';
+      ctx.beginPath(); ctx.arc(0, -2, 4, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(0, -2, 3, 0, TAU); ctx.fill();
+      // Turret barrel
+      ctx.fillStyle = f ? '#fff' : '#228866';
+      ctx.fillRect(-1 + Math.cos(turretAngle) * 2, -3 + Math.sin(turretAngle) * 2, 2, 5);
+      // Turret center dot
+      ctx.fillStyle = f ? '#fff' : '#66ffcc';
+      ctx.beginPath(); ctx.arc(0, -2, 1.5, 0, TAU); ctx.fill();
+      // Hull stripe details
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-5, 3, 10, 1);
+      ctx.fillRect(-4, 6, 8, 1);
+      // Engine pods
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.fillRect(-6, 8, 4, 3);
+      ctx.fillRect(2, 8, 4, 3);
+      ctx.fillStyle = f ? '#fff' : '#0a5544';
+      ctx.fillRect(-5, 9, 2, 2);
+      ctx.fillRect(3, 9, 2, 2);
+      // Thruster
+      if (ship.thrusting) {
+        const flicker = Math.random() * 3;
+        ctx.fillStyle = '#44ddaa';
+        ctx.fillRect(-5, 11, 3, 3 + flicker);
+        ctx.fillRect(2, 11, 3, 3 + flicker);
+        ctx.fillStyle = '#88ffcc';
+        ctx.fillRect(-4, 11, 1, 2);
+        ctx.fillRect(3, 11, 1, 2);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#22aa88';
+        ctx.fillRect(-5, 14, 3, 2 + flicker);
+        ctx.fillRect(2, 14, 3, 2 + flicker);
+        ctx.globalAlpha = 1;
+      }
+    },
+  },
+  mycon: {
+    name: 'Podship', race: 'Mycon',
+    color: '#aa2266', accent: '#dd4488', dark: '#661144',
+    turnSpeed: 0.03, thrust: 0.12, maxSpeed: 3, drag: 0.997,
+    maxCrew: 30, maxEnergy: 100, energyRegen: 0.4,
+    weapon: { type: 'homing', damage: 3, speed: 4, rate: 18, cost: 10, color: '#ff4488', size: 4 },
+    special: { name: 'Regenerate', cost: 30, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      const pulse = Math.sin(frame * 0.08) * 2;
+      // Organic blob body
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, 0, 12 + pulse, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, -1, 10, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.arc(0, -3, 6, 0, TAU); ctx.fill();
+      // Fungal tendrils
+      if (!f) {
+        ctx.fillStyle = '#cc3366';
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * TAU + frame * 0.02;
+          const r = 11 + Math.sin(frame * 0.1 + i) * 2;
+          ctx.fillRect(Math.cos(a) * r, Math.sin(a) * r, 2, 2);
+        }
+      }
+      // Spore eye
+      ctx.fillStyle = '#ffcc00';
+      ctx.beginPath(); ctx.arc(0, -4, 3, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath(); ctx.arc(0, -4, 1.5, 0, TAU); ctx.fill();
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ff66aa'; ctx.fillRect(-3, 10, 6, 3 + Math.random() * 3);
+      }
+    },
+  },
+  pkunk: {
+    name: 'Fury', race: 'Pkunk',
+    color: '#4488cc', accent: '#66aaee', dark: '#225588',
+    turnSpeed: 0.09, thrust: 0.3, maxSpeed: 6, drag: 0.993,
+    maxCrew: 12, maxEnergy: 80, energyRegen: 0.7,
+    weapon: { type: 'spread', damage: 1, speed: 9, rate: 6, cost: 3, color: '#88ddff', size: 2 },
+    special: { name: 'Resurrect', cost: 50, duration: 1 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Bird-like ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-5, 6); ctx.lineTo(5, 6); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-4, 5); ctx.lineTo(4, 5); ctx.fill();
+      // Wings spread wide
+      ctx.fillStyle = f ? '#fff' : ship.def.accent;
+      ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(-16, -4); ctx.lineTo(-12, 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(16, -4); ctx.lineTo(12, 4); ctx.fill();
+      // Wing tips
+      ctx.fillStyle = f ? '#fff' : '#88ddff';
+      ctx.beginPath(); ctx.moveTo(-14, -3); ctx.lineTo(-18, -6); ctx.lineTo(-14, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(14, -3); ctx.lineTo(18, -6); ctx.lineTo(14, 0); ctx.fill();
+      // Eye
+      ctx.fillStyle = '#fff'; ctx.fillRect(-2, -6, 4, 3);
+      ctx.fillStyle = '#111'; ctx.fillRect(-1, -5, 2, 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#66bbff'; ctx.fillRect(-2, 6, 4, 3 + Math.random() * 2);
+      }
+    },
+  },
+  melnorme: {
+    name: 'Trader', race: 'Melnorme',
+    color: '#ddaa22', accent: '#ffcc44', dark: '#886611',
+    turnSpeed: 0.04, thrust: 0.18, maxSpeed: 3.5, drag: 0.996,
+    maxCrew: 20, maxEnergy: 100, energyRegen: 0.5,
+    weapon: { type: 'beam', damage: 2, speed: 10, rate: 12, cost: 8, color: '#ffdd44', size: 3 },
+    special: { name: 'Confusion', cost: 25, duration: 45 },
+    draw(ship) {
+      const f = ship.flash > 0;
+      // Round trader ship
+      ctx.fillStyle = f ? '#fff' : ship.def.dark;
+      ctx.beginPath(); ctx.arc(0, 0, 12, 0, TAU); ctx.fill();
+      ctx.fillStyle = f ? '#fff' : ship.def.color;
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, TAU); ctx.fill();
+      // Ring around ship
+      ctx.strokeStyle = f ? '#fff' : ship.def.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(0, 0, 15, 6, 0, 0, TAU); ctx.stroke();
+      ctx.lineWidth = 1;
+      // Center dome
+      ctx.fillStyle = f ? '#fff' : '#ffee88';
+      ctx.beginPath(); ctx.arc(0, -2, 5, 0, TAU); ctx.fill();
+      // Eye
+      ctx.fillStyle = '#222';
+      ctx.beginPath(); ctx.arc(0, -3, 2, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffcc00';
+      ctx.beginPath(); ctx.arc(0, -3, 1, 0, TAU); ctx.fill();
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ffaa22'; ctx.fillRect(-3, 10, 6, 3 + Math.random() * 2);
+      }
+    },
+  },
+};
+
+// ==================== COMBAT SHIP ====================
+class Ship {
+  constructor(type, x, y, angle, isPlayer) {
+    this.def = SHIP_TYPES[type];
+    this.type = type;
+    this.x = x; this.y = y; this.angle = angle || 0;
+    this.vx = 0; this.vy = 0;
+    this.crew = this.def.maxCrew;
+    this.energy = this.def.maxEnergy;
+    this.alive = true;
+    this.fireTimer = 0;
+    this.flash = 0;
+    this.thrusting = false;
+    this.shieldTimer = 0;
+    this.specialCooldown = 0;
+    this.isPlayer = isPlayer || false;
+    this.drones = [];
+  }
+  update() {
+    if (this.flash > 0) this.flash--;
+    if (this.fireTimer > 0) this.fireTimer--;
+    if (this.shieldTimer > 0) this.shieldTimer--;
+    if (this.specialCooldown > 0) this.specialCooldown--;
+    const rechargeBonus = this.isPlayer && this.energyRechargeBonus ? (1 + this.energyRechargeBonus) : 1;
+    this.energy = Math.min(this.def.maxEnergy, this.energy + this.def.energyRegen * rechargeBonus);
+
+    // Apply gravity from combat planet
+    if (combatPlanet) {
+      const dx = combatPlanet.x - this.x, dy = combatPlanet.y - this.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d > PLANET_RADIUS) {
+        const g = GRAVITY_STRENGTH / (d * d);
+        this.vx += (dx / d) * g;
+        this.vy += (dy / d) * g;
+      }
+      if (d < PLANET_RADIUS + 4) {
+        this.takeDamage(999);
+        spawnParticles(this.x, this.y, '#ff8844', 20, 4);
+      }
+    }
+
+    // Speed limit + drag
+    const spd = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+    if (spd > this.def.maxSpeed) {
+      this.vx *= this.def.maxSpeed / spd;
+      this.vy *= this.def.maxSpeed / spd;
+    }
+    this.vx *= this.def.drag;
+    this.vy *= this.def.drag;
+
+    this.x += this.vx; this.y += this.vy;
+
+    // Wrap around arena
+    const ARENA = 400;
+    if (this.x < -ARENA) this.x += ARENA * 2;
+    if (this.x > ARENA) this.x -= ARENA * 2;
+    if (this.y < -ARENA) this.y += ARENA * 2;
+    if (this.y > ARENA) this.y -= ARENA * 2;
+
+    // Update drones
+    for (const d of this.drones) {
+      d.angle += 0.08;
+      d.x = this.x + Math.cos(d.angle) * 25;
+      d.y = this.y + Math.sin(d.angle) * 25;
+      d.life--;
+    }
+    this.drones = this.drones.filter(d => d.life > 0);
+  }
+  turnLeft() { this.angle -= this.def.turnSpeed; }
+  turnRight() { this.angle += this.def.turnSpeed; }
+  thrustForward() {
+    this.vx += Math.cos(this.angle - Math.PI/2) * this.def.thrust;
+    this.vy += Math.sin(this.angle - Math.PI/2) * this.def.thrust;
+    this.thrusting = true;
+    if (frame % 3 === 0) spawnParticles(
+      this.x - Math.cos(this.angle - Math.PI/2) * 8,
+      this.y - Math.sin(this.angle - Math.PI/2) * 8,
+      '#ff8844', 1, 1
+    );
+  }
+  fire() {
+    if (this.fireTimer > 0 || this.energy < this.def.weapon.cost) return;
+    this.fireTimer = this.def.weapon.rate;
+    this.energy -= this.def.weapon.cost;
+    const w = this.def.weapon;
+    const nx = Math.cos(this.angle - Math.PI/2), ny = Math.sin(this.angle - Math.PI/2);
+
+    if (w.type === 'spread') {
+      for (let i = -1; i <= 1; i++) {
+        const a = this.angle - Math.PI/2 + i * 0.2;
+        projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: Math.cos(a)*w.speed + this.vx*0.3, vy: Math.sin(a)*w.speed + this.vy*0.3, damage: w.damage, owner: this, color: w.color, size: w.size, life: 40 });
+      }
+    } else if (w.type === 'scatter') {
+      const a = this.angle - Math.PI/2 + (Math.random() - 0.5) * 0.4;
+      projectiles.push({ x: this.x + nx*8, y: this.y + ny*8, vx: Math.cos(a)*w.speed + this.vx*0.5, vy: Math.sin(a)*w.speed + this.vy*0.5, damage: w.damage, owner: this, color: w.color, size: w.size, life: 30 });
+    } else if (w.type === 'homing') {
+      const target = this.isPlayer ? enemyShip : playerShip;
+      projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed, vy: ny*w.speed, damage: w.damage, owner: this, color: w.color, size: w.size, life: 80, homing: true, target });
+    } else {
+      projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed + this.vx*0.3, vy: ny*w.speed + this.vy*0.3, damage: w.damage, owner: this, color: w.color, size: w.size, life: 50 });
+    }
+    sfx.shoot();
+  }
+  useSpecial() {
+    if (this.specialCooldown > 0 || this.energy < this.def.special.cost) return;
+    this.energy -= this.def.special.cost;
+    const sp = this.def.special;
+    if (sp.name === 'Shield') {
+      this.shieldTimer = sp.duration;
+      this.specialCooldown = sp.duration + 30;
+      sfx.shield();
+    } else if (sp.name === 'Afterburner') {
+      const nx = Math.cos(this.angle - Math.PI/2), ny = Math.sin(this.angle - Math.PI/2);
+      this.vx += nx * 8; this.vy += ny * 8;
+      this.specialCooldown = 60;
+      spawnParticles(this.x, this.y, '#ff4400', 10, 4);
+      sfx.thrust();
+    } else if (sp.name === 'Heal') {
+      this.crew = Math.min(this.def.maxCrew, this.crew + 5);
+      this.specialCooldown = 120;
+      spawnParticles(this.x, this.y, '#44ff88', 10, 2);
+      sfx.pickup();
+    } else if (sp.name === 'Gravity Bomb') {
+      projectiles.push({ x: this.x, y: this.y, vx: 0, vy: 0, damage: 0, owner: this, color: '#8888ff', size: 6, life: 120, gravBomb: true });
+      this.specialCooldown = 90;
+      sfx.alarm();
+    } else if (sp.name === 'Drone') {
+      this.drones.push({ x: this.x, y: this.y, angle: Math.random() * TAU, life: 300 });
+      this.specialCooldown = 60;
+      sfx.confirm();
+    } else if (sp.name === 'Teleport') {
+      spawnParticles(this.x, this.y, '#cc66ff', 15, 3);
+      this.x = (Math.random() - 0.5) * 600;
+      this.y = (Math.random() - 0.5) * 600;
+      this.vx = 0; this.vy = 0;
+      this.specialCooldown = 90;
+      spawnParticles(this.x, this.y, '#cc66ff', 15, 3);
+      sfx.warp();
+    } else if (sp.name === 'Fighters') {
+      // Ur-Quan launches fighter drones
+      for (let fi = 0; fi < 3; fi++) {
+        this.drones.push({ x: this.x, y: this.y, angle: Math.random() * TAU, life: 200 });
+      }
+      this.specialCooldown = 120;
+      sfx.confirm();
+    } else if (sp.name === 'Regenerate') {
+      // Mycon regenerates crew
+      this.crew = Math.min(this.def.maxCrew, this.crew + 3);
+      this.specialCooldown = 90;
+      spawnParticles(this.x, this.y, '#ff66aa', 10, 2);
+      sfx.pickup();
+    } else if (sp.name === 'Resurrect') {
+      // Pkunk - store a resurrection charge
+      this.crew = Math.min(this.def.maxCrew, this.crew + 6);
+      this.specialCooldown = 180;
+      spawnParticles(this.x, this.y, '#66aaff', 15, 3);
+      sfx.victory();
+    } else if (sp.name === 'Confusion') {
+      // Melnorme confusion blast - spawns decoy projectiles
+      for (let ci = 0; ci < 8; ci++) {
+        const ca = (ci / 8) * TAU;
+        projectiles.push({ x: this.x, y: this.y, vx: Math.cos(ca) * 4, vy: Math.sin(ca) * 4, damage: 1, owner: this, color: '#ffdd44', size: 2, life: 40 });
+      }
+      this.specialCooldown = 60;
+      sfx.alarm();
+    }
+  }
+  takeDamage(dmg) {
+    if (this.shieldTimer > 0) { this.shieldTimer = Math.max(0, this.shieldTimer - 10); return; }
+    this.crew -= dmg;
+    this.flash = 6;
+    screenShake = 6;
+    if (this.crew <= 0) { this.crew = 0; this.alive = false; }
+  }
+  draw(cx, cy) {
+    ctx.save();
+    ctx.translate(this.x - cx, this.y - cy);
+    ctx.rotate(this.angle);
+    this.def.draw(this);
+    ctx.restore();
+    this.thrusting = false;
+  }
+}
+
+// ==================== COMBAT AI ====================
+let screenShake = 0;
+
+function updateAI(ship, target) {
+  const dx = target.x - ship.x, dy = target.y - ship.y;
+  const d = dist(ship.x, ship.y, target.x, target.y);
+  const targetAngle = Math.atan2(dy, dx) + Math.PI / 2;
+  const diff = normAngle(targetAngle - ship.angle);
+
+  // Smarter AI: different behaviors based on distance and ship type
+  const isRanged = ship.def.weapon.type === 'beam' || ship.def.weapon.type === 'homing';
+  const isFast = ship.def.maxSpeed > 5;
+  const idealDist = isRanged ? 180 : (isFast ? 100 : 120);
+
+  // Turn toward target (with lead prediction)
+  const leadX = target.x + target.vx * 8;
+  const leadY = target.y + target.vy * 8;
+  const leadAngle = Math.atan2(leadY - ship.y, leadX - ship.x) + Math.PI / 2;
+  const leadDiff = normAngle(leadAngle - ship.angle);
+
+  if (leadDiff > 0.08) ship.turnRight();
+  else if (leadDiff < -0.08) ship.turnLeft();
+
+  // Movement: approach to ideal distance, retreat if too close
+  if (d > idealDist + 30) {
+    ship.thrustForward();
+  } else if (d < idealDist - 40) {
+    // Strafe/retreat - thrust at an angle away
+    if (Math.random() < 0.3) ship.thrustForward();
+  } else {
+    // At ideal range - strafe
+    if (frame % 60 < 30) ship.thrustForward();
+  }
+
+  // Fire when aimed at target
+  if (Math.abs(diff) < 0.5 && d < 280) ship.fire();
+
+  // Use special more strategically
+  if (ship.energy > ship.def.special.cost && ship.specialCooldown <= 0) {
+    if (ship.def.special.name === 'Fighters' && d < 200) ship.useSpecial();
+    else if (ship.def.special.name === 'Teleport' && d < 50) ship.useSpecial();
+    else if (ship.def.special.name === 'Regenerate' && ship.crew < ship.def.maxCrew * 0.5) ship.useSpecial();
+    else if (ship.def.special.name === 'Drone' && ship.drones.length < 3) ship.useSpecial();
+    else if (ship.def.special.name === 'Confusion' && d < 150) ship.useSpecial();
+    else if (d < 80) ship.useSpecial();
+  }
+
+  // Avoid planet
+  if (combatPlanet) {
+    const pd = dist(ship.x, ship.y, combatPlanet.x, combatPlanet.y);
+    if (pd < PLANET_RADIUS + 30) ship.thrustForward();
+  }
+}
+
+// ==================== STAR MAP GENERATION ====================
+const STAR_COLORS = [
+  { name: 'Yellow', fill: '#ffdd44', glow: '#ffee88' },
+  { name: 'Red', fill: '#ff6644', glow: '#ff9977' },
+  { name: 'Blue', fill: '#4488ff', glow: '#88bbff' },
+  { name: 'White', fill: '#eeeeff', glow: '#ffffff' },
+  { name: 'Orange', fill: '#ff8833', glow: '#ffaa66' },
+];
+
+function generateStarMap() {
+  starMap = [];
+  const used = new Set();
+  // Home star at center
+  starMap.push({
+    x: 0, y: 0, name: 'Sol', color: STAR_COLORS[0], type: 'home',
+    planets: [
+      { name: 'Mercury', type: 'Rocky', minerals: 25, fuel: 0, scanned: false, color: '#aa8866', radius: 8 },
+      { name: 'Venus', type: 'Toxic', minerals: 15, fuel: 5, scanned: false, color: '#ccaa44', radius: 12 },
+      { name: 'Earth', type: 'Water', minerals: 0, fuel: 50, scanned: true, color: '#4488ff', radius: 13 },
+      { name: 'Mars', type: 'Desert', minerals: 20, fuel: 5, scanned: false, color: '#cc6633', radius: 10 },
+      { name: 'Jupiter', type: 'Gas Giant', minerals: 5, fuel: 60, scanned: false, color: '#cc8844', radius: 24 },
+      { name: 'Saturn', type: 'Gas Giant', minerals: 5, fuel: 45, scanned: false, color: '#ddbb66', radius: 22 },
+      { name: 'Uranus', type: 'Ice', minerals: 10, fuel: 20, scanned: false, color: '#88ccdd', radius: 16 },
+      { name: 'Neptune', type: 'Ice', minerals: 10, fuel: 20, scanned: false, color: '#4466cc', radius: 16 },
+      { name: 'Pluto', type: 'Rocky', minerals: 30, fuel: 2, scanned: false, color: '#999999', radius: 6 },
+    ],
+    alien: null, territory: null, artifact: false, visited: true,
+  });
+  // === SC2-style territory regions — each race owns a cluster of stars ===
+  const territories = [
+    { race: 'urquan',    cx: -500, cy: -400, label: 'Ur-Quan Space' },
+    { race: 'spathi',    cx:  500, cy: -300, label: 'Spathi Space' },
+    { race: 'chmmr',     cx:  200, cy:  500, label: 'Chmmr Space' },
+    { race: 'zoqfotpik', cx: -400, cy:  300, label: 'ZFP Space' },
+    { race: 'mycon',     cx:  600, cy:  400, label: 'Mycon Space' },
+    { race: 'pkunk',     cx: -600, cy:  100, label: 'Pkunk Space' },
+    { race: 'melnorme',  cx:    0, cy: -600, label: 'Melnorme Space' },
+    { race: 'orz',       cx: -200, cy: -700, label: 'Orz Space' },
+  ];
+
+  const constellations = [
+    'Centauri','Draconis','Hyades','Lyncis','Cygni','Vulpeculae','Corvi','Serpentis',
+    'Pavonis','Aquarii','Tucanae','Orionis','Gruis','Tauri','Crucis','Ophiuchi',
+  ];
+  const greekNames = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta',
+    'Iota','Kappa','Lambda','Mu','Nu','Xi','Omicron','Rho','Sigma','Tau','Upsilon','Phi','Chi','Psi','Omega','Vega'];
+
+  const planetTypes = [
+    { type: 'Rocky', colors: ['#aa8866','#cc9955','#997744'], minR: 8, maxR: 14 },
+    { type: 'Gas Giant', colors: ['#cc8844','#ddaa66','#bb7733'], minR: 18, maxR: 26 },
+    { type: 'Water', colors: ['#4488cc','#3377aa','#5599dd'], minR: 10, maxR: 16 },
+    { type: 'Jungle', colors: ['#44aa44','#66bb55','#338833'], minR: 10, maxR: 16 },
+    { type: 'Ice', colors: ['#99bbdd','#aaccee','#88aacc'], minR: 8, maxR: 14 },
+    { type: 'Volcanic', colors: ['#cc4422','#dd5533','#aa3311'], minR: 8, maxR: 14 },
+    { type: 'Desert', colors: ['#ccaa44','#ddbb55','#bbaa33'], minR: 9, maxR: 15 },
+    { type: 'Toxic', colors: ['#88aa22','#99bb33','#77aa11'], minR: 9, maxR: 13 },
+  ];
+  const romanNums = ['I','II','III','IV','V','VI','VII','VIII'];
+
+  function makePlanets(starName, count) {
+    const plnts = [];
+    for (let j = 0; j < count; j++) {
+      const pt = planetTypes[Math.floor(Math.random() * planetTypes.length)];
+      const pColor = pt.colors[Math.floor(Math.random() * pt.colors.length)];
+      const mineralMult = pt.type === 'Gas Giant' ? 0.3 : (pt.type === 'Volcanic' ? 2.0 : pt.type === 'Rocky' ? 1.5 : 1.0);
+      const fuelMult = pt.type === 'Gas Giant' ? 2.5 : (pt.type === 'Ice' ? 0.5 : 1.0);
+      plnts.push({
+        name: `${starName} ${romanNums[j]}`,
+        type: pt.type,
+        minerals: Math.floor((10 + Math.random() * 40) * mineralMult),
+        fuel: Math.floor((5 + Math.random() * 25) * fuelMult),
+        scanned: false, color: pColor,
+        radius: pt.minR + Math.floor(Math.random() * (pt.maxR - pt.minR)),
+      });
+    }
+    return plnts;
+  }
+
+  let starIdx = 0;
+  // Generate 3 stars per territory (24 alien stars) + 8 neutral stars = 32 total + Sol
+  for (let ti = 0; ti < territories.length; ti++) {
+    const t = territories[ti];
+    const constel = constellations[ti];
+    for (let si = 0; si < 3; si++) {
+      // Cluster stars around territory center with some spread
+      const angle = (si / 3) * TAU + Math.random() * 0.8;
+      const radius = 80 + Math.random() * 120;
+      const x = t.cx + Math.cos(angle) * radius;
+      const y = t.cy + Math.sin(angle) * radius;
+      const col = STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)];
+      const sName = `${greekNames[starIdx % greekNames.length]} ${constel}`;
+      const numPlanets = 3 + Math.floor(Math.random() * 6);
+      // First star of first 3 territories gets an artifact (urquan, spathi, mycon)
+      const hasArtifact = (si === 0 && (ti === 0 || ti === 4 || ti === 7));
+      starMap.push({
+        x, y, name: sName, color: col, type: 'normal',
+        planets: makePlanets(greekNames[starIdx % greekNames.length], numPlanets),
+        alien: t.race, territory: t.race,
+        artifact: hasArtifact, visited: false,
+      });
+      starIdx++;
+    }
+  }
+  // Add 8 neutral/unowned stars scattered in between
+  for (let ni = 0; ni < 8; ni++) {
+    let x, y;
+    do {
+      x = (Math.random() - 0.5) * MAP_SIZE;
+      y = (Math.random() - 0.5) * MAP_SIZE;
+    } while (starMap.some(s => dist(s.x, s.y, x, y) < 100));
+    const col = STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)];
+    const sName = `${greekNames[(starIdx + ni) % greekNames.length]} ${constellations[(8 + ni) % constellations.length]}`;
+    starMap.push({
+      x, y, name: sName, color: col, type: 'normal',
+      planets: makePlanets(greekNames[(starIdx + ni) % greekNames.length], 3 + Math.floor(Math.random() * 5)),
+      alien: null, territory: null,
+      artifact: false, visited: false,
+    });
+  }
+}
+
+// ==================== ALIEN DIALOGUES ====================
+const DIALOGUES = {
+  urquan: {
+    portrait: { color: '#44aa44', eye: '#ff0', skin: '#338833' },
+    greeting: 'You stand before the Ur-Quan Kzer-Za. We have been... humbled. The Sa-Matra is gone. Our slave shields are broken. But we are still UR-QUAN.',
+    friendly: 'You defeated us once, Human. We will not forget. But the rift threatens ALL species. Even Ur-Quan.',
+    hostile: 'You think because the Sa-Matra fell, we are WEAK? We are STILL the greatest warriors in this galaxy!',
+    choices: [
+      { text: 'The war is over. Can we be allies?', response: 'ALLIES?! The Ur-Quan do not make allies, we make... hmm. The Kohr-Ah were wrong about annihilation. Perhaps we can trade. 20 minerals for passage.', action: 'trade', cost: 20 },
+      { text: 'Submit or be destroyed, Ur-Quan!', response: 'SUBMIT?! No one tells an Ur-Quan to SUBMIT! You will learn why we conquered a THOUSAND worlds!', action: 'fight' },
+      { text: 'Do you know about the dimensional rift?', response: 'When you destroyed our Sa-Matra, its explosion tore the fabric of HyperSpace. Something from *below* is leaking through. We guard a Precursor Seal near here. Defeat us to claim it.', action: 'info' },
+    ],
+  },
+  spathi: {
+    portrait: { color: '#dd8844', eye: '#fff', skin: '#cc7733' },
+    greeting: 'OH NO! A ship! Please do not hurt us! We are the Spathi! We are VERY harmless and NOT worth eating! Our Eluder is pointed AWAY from you, see?',
+    friendly: 'You... you are not going to eat us? Oh thank the great Spathi god of running away! You are our BEST FRIEND!',
+    hostile: 'AIEEE! We KNEW this would happen! We told the other Spathi but did they listen? NOOO!',
+    choices: [
+      { text: 'Relax! Can you help repair our ship?', response: 'Oh! Oh yes! We are VERY good at fixing things! Mostly our own ship after running away. +10 crew!', action: 'heal' },
+      { text: 'We need HyperSpace fuel.', response: 'Fuel? YES! Take it! Take 30 units! Just please do not shoot at us! We bruise VERY easily!', action: 'fuel' },
+      { text: 'Have you seen anything strange lately?', response: 'STRANGE?! Everything is strange and TERRIFYING! There are things coming through from *below*! Like the Orz but WORSE! Find the three Precursor Seals before they get here! We are going to HIDE now!', action: 'info' },
+    ],
+  },
+  chmmr: {
+    portrait: { color: '#88aadd', eye: '#aaccff', skin: '#6688bb' },
+    greeting: 'We are the Chmmr. Born of Chenjesu crystal and Mmrnmhrm steel, fused beneath the slave shield. We have been expecting you, Captain.',
+    friendly: 'Your Precursor vessel resonates with our crystalline structure. We sense a kinship between us.',
+    hostile: 'We did not survive Ur-Quan enslavement to be threatened by you.',
+    choices: [
+      { text: 'Tell me about the Precursor Seals.', response: 'The Precursors understood dimensional boundaries. They forged three Seals to reinforce the barriers. When the Sa-Matra detonated, it shattered those barriers. The Seals are scattered across the galaxy.', action: 'info' },
+      { text: 'We need minerals for the Vindicator.', response: 'Our crystalline matrix naturally sheds useful compounds. Take what you need. +30 minerals.', action: 'minerals' },
+      { text: 'Test the Vindicator in combat!', response: 'The Chmmr Avatar is formidable. Very well. Let us see if your Precursor ship is worthy.', action: 'fight' },
+    ],
+  },
+  zoqfotpik: {
+    portrait: { color: '#cc6622', eye: '#ff0000', skin: '#aa5511' },
+    greeting: 'Hello hello hello! We are the Zoq-Fot-Pik! I am the Zoq! And I am the Fot! And I am the Pik! We are SO happy to see you again, Human friend!',
+    friendly: 'You saved us from the Ur-Quan! The Zoq are grateful! The Fot are grateful! The Pik... the Pik is always grateful!',
+    hostile: 'Even the Pik is angry now! And the Pik is NEVER angry! Well, almost never!',
+    choices: [
+      { text: 'Want to trade, little friends?', response: 'YES! Shiny minerals! Give 15, we give HyperSpace fuel! The Melnorme charged SO much! We give 25 fuel for only 15 minerals! The Fot thinks this is fair!', action: 'swtrade', cost: 15, give: 25 },
+      { text: 'Seen anything scary out here?', response: 'SCARY?! Oh YES! Things from *below*! Like the Orz but MUCH worse! The Zoq saw them! The Fot hid! The Pik... the Pik just stood there. The Pik is very brave. Or very dumb.', action: 'info' },
+      { text: 'We need to pass through your space.', response: 'Of course-course! But first, the Pik wants to practice fighting! Friendly fight! No killing! The Fot will watch!', action: 'spar' },
+    ],
+  },
+  orz: {
+    portrait: { color: '#33ccaa', eye: '#ff00ff', skin: '#228877' },
+    greeting: 'Hello! I am Orz! I am *happy campers*! It is so *squishy* to finally *dance* with you in *heavy space*! Do you want to *play*?',
+    friendly: 'You are *happy campers* too! Orz and you are *connected* in *the middle*! So much *juice*!',
+    hostile: 'You are not *happy campers*. You are *silly cows*. Now Orz must *pull* you *below*.',
+    choices: [
+      { text: 'Where do you come from, Orz?', response: 'Orz is from *below*! Or maybe *above*! It is the same *place* but not a place! Like the Androsynth, they went *below* and now they are *dancing*! Forever *dancing*!', action: 'info' },
+      { text: 'Are you causing the dimensional rift?', response: 'Rift? Oh! You mean the *opening*! Yes it is very *pretty*! When the big boom happened, it made *cracks* and now more Orz *fingers* can come through! The Precursor *toys* can close it. Maybe. If you *play* right!', action: 'info' },
+      { text: 'We will stop you from coming through!', response: '*Laughing*! You cannot stop Orz! Orz is already *here*! But if you want to *dance*, Orz will *dance*! It is *fun*!', action: 'fight' },
+    ],
+  },
+  mycon: {
+    portrait: { color: '#aa2266', eye: '#ffcc00', skin: '#882255' },
+    greeting: 'WE ARE MYCON. WE GROW. WE SPREAD. WE ARE THE DEEP CHILDREN OF JUF-NUUN. THE SPORES MULTIPLY.',
+    friendly: 'YOUR BIOLOGICAL WARMTH... FEEDS US. WE WILL ALLOW YOUR EXISTENCE. FOR NOW.',
+    hostile: 'NON-FUNGAL LIFE IS AN ABERRATION. YOU WILL BE COMPOSTED.',
+    choices: [
+      { text: 'What happened after the Ur-Quan war?', response: 'WAR? THE MYCON DO NOT CARE FOR UR-QUAN POLITICS. WE PLANTED DEEP CHILDREN ON MANY WORLDS. THE SYREEN WERE... UNHAPPY. BUT WE GROW STILL.', action: 'info' },
+      { text: 'We need to pass through peacefully.', response: 'PEACE IS A CONCEPT FOR BEINGS WHO FEAR DEATH. WE DO NOT FEAR. WE SIMPLY GROW. GIVE US 20 MINERALS TO FEED OUR SPORES.', action: 'trade', cost: 20 },
+      { text: 'Get out of our way, fungus!', response: 'FUNGUS?! WE ARE PERFECTION! THE DEEP CHILDREN WILL CONSUME YOUR SHIP!', action: 'fight' },
+    ],
+  },
+  pkunk: {
+    portrait: { color: '#4488cc', eye: '#fff', skin: '#3377aa' },
+    greeting: 'Ahhh! I sense a great and luminous aura approaching! It is you, dear Captain! The cosmic winds foretold your coming! Peace and love!',
+    friendly: 'Your chakras are beautifully aligned, dear friend! The Pkunk embrace you with our spiritual wings!',
+    hostile: 'Even we Pkunk have limits to our patience! Your aura is... rather muddy today!',
+    choices: [
+      { text: 'Can you heal our crew?', response: 'Oh YES! Let me channel the cosmic healing energies! The great bird spirit flows through me! +10 crew! Namaste!', action: 'heal' },
+      { text: 'Do you have fuel to share?', response: 'Fuel? Material concerns! But yes, we understand you need it to save the galaxy. Take 30 units! The universe provides!', action: 'fuel' },
+      { text: 'What do your visions show?', response: 'I see... a GREAT DARKNESS from *below*! The Orz are merely the first ripple! The three Precursor Seals must be found or all will be *dissolved*! Also, you should drink more water.', action: 'info' },
+    ],
+  },
+  melnorme: {
+    portrait: { color: '#ddaa22', eye: '#222', skin: '#cc9911' },
+    greeting: 'Greetings, valued customer! I am Trade Master Greenish of the Melnorme. We deal in information, technology, and fuel. All at VERY reasonable prices!',
+    friendly: 'A repeat customer! We offer loyalty discounts of exactly zero percent! But we DO appreciate your business!',
+    hostile: 'Attacking a Melnorme vessel is extremely bad for your credit rating.',
+    choices: [
+      { text: 'What information do you have?', response: 'For 15 minerals, I can tell you this: the dimensional rift was caused by the Sa-Matra detonation. Three Precursor Seals can close it. The Orz do not want it closed. This information is NOW free. You are welcome!', action: 'trade', cost: 15 },
+      { text: 'Can we buy fuel?', response: 'Of course! 10 minerals for 30 units of HyperSpace fuel! The Druuge charge MUCH more, and they want your crew! We are MUCH more ethical!', action: 'swtrade', cost: 10, give: 30 },
+      { text: 'Tell us about the Orz.', response: 'The Orz are... projections. Fingers of a larger entity pushing through from another dimension. The Androsynth found this out the hard way. They are ALL gone now. Do not *pull* too hard.', action: 'info' },
+    ],
+  },
+};
+
+// ==================== INIT FUNCTIONS ====================
+function initGame() {
+  fuel = 100; minerals = 50; crew = 20; maxCrew = 20;
+  artifacts = 0; modules = [];
+  visitedStars = new Set([0]);
+  defeatedAliens = new Set();
+  currentStarIdx = 0;
+  generateStarMap();
+  // HyperSpace — player starts at Sol
+  hyperX = 0; hyperY = 0; hyperVX = 0; hyperVY = 0;
+  hyperAngle = -Math.PI / 2; hyperDest = null;
+  hyperEncounterTimer = 0;
+  mapCamX = 0; mapCamY = 0;
+  selectedStar = null;
+  gameMessage = null; messageTimer = 0;
+  particles = [];
+}
+
+function getModuleStat(stat) {
+  return modules.reduce((sum, m) => {
+    const def = MODULE_DEFS.find(d => d.name === m);
+    return def && def.stat === stat ? sum + def.val : sum;
+  }, 0);
+}
+function initCombat(enemyType) {
+  const pDef = SHIP_TYPES.player;
+  const crewBonus = getModuleStat('crew');
+  const thrustBonus = getModuleStat('thrust');
+  const speedBonus = getModuleStat('speed');
+  const weaponBonus = getModuleStat('weapon');
+  const turnBonus = getModuleStat('turn');
+  const firerateMult = modules.some(m => MODULE_DEFS.find(d => d.name === m && d.stat === 'firerate')) ? getModuleStat('firerate') : 1;
+  playerShip = new Ship('player', -120, 0, 0, true);
+  playerShip.crew = Math.min(crew, pDef.maxCrew + crewBonus);
+  playerShip.def = {
+    ...pDef,
+    maxCrew: pDef.maxCrew + crewBonus,
+    thrust: pDef.thrust + thrustBonus,
+    maxSpeed: pDef.maxSpeed + speedBonus,
+    turnSpeed: pDef.turnSpeed + turnBonus,
+    weapon: { ...pDef.weapon, damage: pDef.weapon.damage + weaponBonus, cooldown: Math.floor(pDef.weapon.cooldown * firerateMult) },
+    draw: pDef.draw, special: pDef.special,
+  };
+  playerShip.hasPointDef = getModuleStat('pointdef') > 0;
+  playerShip.energyRechargeBonus = getModuleStat('energy');
+
+  enemyShip = new Ship(enemyType, 120, 0, Math.PI, false);
+  projectiles = []; particles = [];
+  combatPlanet = { x: 0, y: 0, radius: PLANET_RADIUS };
+  window._combatZoom = 0.5;
+}
+
+// ==================== DRAWING HELPERS ====================
+function drawStarField(ox, oy, density, hyperspace) {
+  // SC2-style starfield with colorful stars
+  const starColors = ['#ffffff','#ffccaa','#aaccff','#ffff88','#ff8888','#88ff88','#88ccff','#ffaaff'];
+  for (let i = 0; i < (density || 60); i++) {
+    const seed = i * 7919;
+    const sx = ((seed * 13 + 4729) % (W * 4)) - ox * 0.03;
+    const sy = ((seed * 17 + 6271) % (H * 4)) - oy * 0.03;
+    const bx = ((sx % (W * 4)) + W * 4) % (W * 4);
+    const by = ((sy % (H * 4)) + H * 4) % (H * 4);
+    if (bx < W && by < H) {
+      const b = (seed % 100) / 100;
+      const twinkle = Math.sin(frame * 0.05 + seed) * 0.2 + 0.8;
+      ctx.globalAlpha = (0.4 + b * 0.6) * twinkle;
+      ctx.fillStyle = starColors[seed % starColors.length];
+      const sz = b > 0.92 ? 2 : 1;
+      ctx.fillRect(Math.floor(bx), Math.floor(by), sz, sz);
+      // Bright stars get a cross sparkle
+      if (b > 0.95 && twinkle > 0.9) {
+        ctx.globalAlpha *= 0.4;
+        ctx.fillRect(Math.floor(bx) - 1, Math.floor(by), 3, 1);
+        ctx.fillRect(Math.floor(bx), Math.floor(by) - 1, 1, 3);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  // HyperSpace green grid overlay for star map
+  if (hyperspace) {
+    ctx.strokeStyle = 'rgba(0,180,0,0.12)';
+    ctx.lineWidth = 1;
+    const gridSize = 60;
+    const gox = (-ox % gridSize + gridSize) % gridSize;
+    const goy = (-oy % gridSize + gridSize) % gridSize;
+    for (let x = gox; x < W; x += gridSize) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = goy; y < H; y += gridSize) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    // Brighter grid intersection dots
+    ctx.fillStyle = 'rgba(0,220,0,0.2)';
+    for (let x = gox; x < W; x += gridSize) {
+      for (let y = goy; y < H; y += gridSize) {
+        ctx.fillRect(x - 1, y - 1, 2, 2);
+      }
+    }
+  }
+}
+
+function drawAlienPortrait(race, x, y) {
+  const p = DIALOGUES[race].portrait;
+  const W2 = 64, H2 = 64; // SC2-style large portrait
+  // Frame border
+  ctx.fillStyle = '#444'; ctx.fillRect(x - 2, y - 2, W2 + 4, H2 + 4);
+  ctx.fillStyle = '#222'; ctx.fillRect(x - 1, y - 1, W2 + 2, H2 + 2);
+  // Background
+  ctx.fillStyle = '#0a0a18'; ctx.fillRect(x, y, W2, H2);
+
+  if (race === 'urquan') {
+    // Ur-Quan Kzer-Za - green caterpillar-like, many eyes, talking pet on shoulder
+    ctx.fillStyle = '#113311'; ctx.fillRect(x + 6, y + 10, 52, 48);
+    ctx.fillStyle = '#225522'; ctx.fillRect(x + 10, y + 14, 44, 40);
+    ctx.fillStyle = '#338833'; ctx.fillRect(x + 14, y + 18, 36, 32);
+    // Segmented body ridges
+    ctx.fillStyle = '#225522';
+    for (let i = 0; i < 4; i++) ctx.fillRect(x + 14, y + 20 + i * 8, 36, 2);
+    // Many small eyes in a row
+    ctx.fillStyle = '#ffff00';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath(); ctx.arc(x + 18 + i * 7, y + 26, 3, 0, TAU); ctx.fill();
+    }
+    ctx.fillStyle = '#884400';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath(); ctx.arc(x + 18 + i * 7, y + 26, 1.5, 0, TAU); ctx.fill();
+    }
+    // Mandibles
+    ctx.fillStyle = '#446644';
+    ctx.beginPath(); ctx.moveTo(x + 20, y + 40); ctx.lineTo(x + 12, y + 54); ctx.lineTo(x + 26, y + 46); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 44, y + 40); ctx.lineTo(x + 52, y + 54); ctx.lineTo(x + 38, y + 46); ctx.fill();
+    // Talking pet (small creature on side)
+    ctx.fillStyle = '#cc8866'; ctx.beginPath(); ctx.arc(x + 52, y + 14, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.arc(x + 52, y + 13, 2, 0, TAU); ctx.fill();
+  } else if (race === 'spathi') {
+    // Spathi - cowardly mollusk, one big eye on stalk, shell
+    ctx.fillStyle = '#885533'; ctx.fillRect(x + 8, y + 24, 48, 34);
+    ctx.fillStyle = '#aa7744'; ctx.fillRect(x + 12, y + 28, 40, 26);
+    // Shell spiral lines
+    ctx.strokeStyle = '#886633'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x + 32, y + 40, 12, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + 32, y + 40, 8, 0, TAU); ctx.stroke();
+    // Eye stalk
+    ctx.fillStyle = '#cc9966'; ctx.fillRect(x + 29, y + 6, 6, 22);
+    // Big scared eye
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#44aa44'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 32, y + 10, 2.5, 0, TAU); ctx.fill();
+    // Tiny scared pupil
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 30, y + 8, 2, 2);
+    // Tentacles peeking out scared
+    ctx.fillStyle = '#cc9966';
+    ctx.fillRect(x + 10, y + 44, 8, 3);
+    ctx.fillRect(x + 46, y + 44, 8, 3);
+  } else if (race === 'chmmr') {
+    // Chmmr - crystal/metal hybrid, geometric, glowing
+    const glow = Math.sin(frame * 0.06) * 0.3 + 0.7;
+    ctx.fillStyle = '#334466'; ctx.fillRect(x + 8, y + 8, 48, 48);
+    // Crystal body - diamond shape
+    ctx.fillStyle = '#4466aa';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 6); ctx.lineTo(x + 52, y + 32); ctx.lineTo(x + 32, y + 58); ctx.lineTo(x + 12, y + 32); ctx.fill();
+    ctx.fillStyle = '#6688cc';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 10); ctx.lineTo(x + 48, y + 32); ctx.lineTo(x + 32, y + 54); ctx.lineTo(x + 16, y + 32); ctx.fill();
+    // Crystal facets
+    ctx.fillStyle = '#88aadd';
+    ctx.beginPath(); ctx.moveTo(x + 32, y + 14); ctx.lineTo(x + 44, y + 32); ctx.lineTo(x + 32, y + 32); ctx.fill();
+    // Glowing sensor eyes
+    ctx.fillStyle = `rgba(170,200,255,${glow})`; ctx.beginPath(); ctx.arc(x + 26, y + 28, 4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 38, y + 28, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ddeeff'; ctx.beginPath(); ctx.arc(x + 26, y + 28, 2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 38, y + 28, 2, 0, TAU); ctx.fill();
+    // Metal components (Mmrnmhrm fusion)
+    ctx.fillStyle = '#556677';
+    ctx.fillRect(x + 22, y + 38, 20, 4);
+    ctx.fillRect(x + 28, y + 34, 8, 12);
+    // Internal glow
+    ctx.globalAlpha = glow * 0.4;
+    ctx.fillStyle = '#aaccff'; ctx.beginPath(); ctx.arc(x + 32, y + 32, 6, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  } else if (race === 'zoqfotpik') {
+    // Zoq-Fot-Pik - three tiny aliens together, one green, one blue, one brown
+    // Zoq (green, left)
+    ctx.fillStyle = '#44aa44';
+    ctx.beginPath(); ctx.arc(x + 14, y + 36, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 14, y + 34, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 14, y + 34, 1.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#44aa44'; ctx.fillRect(x + 12, y + 44, 4, 10);
+    // Fot (blue, center)
+    ctx.fillStyle = '#4466cc';
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 10, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6688ee';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 36, y + 28, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 36, y + 28, 1.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#4466cc'; ctx.fillRect(x + 30, y + 42, 4, 12);
+    // Pik (brown, right, bigger, dumber looking)
+    ctx.fillStyle = '#886644';
+    ctx.beginPath(); ctx.arc(x + 50, y + 34, 9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa8866';
+    ctx.beginPath(); ctx.arc(x + 50, y + 32, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 50, y + 31, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 50, y + 31, 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#886644'; ctx.fillRect(x + 48, y + 43, 4, 11);
+  } else if (race === 'orz') {
+    // Orz - fish-like interdimensional being, translucent, cheerful but creepy
+    ctx.fillStyle = '#082828'; ctx.fillRect(x, y, W2, H2);
+    // Shimmering dimensional background
+    const t = frame * 0.03;
+    for (let i = 0; i < 6; i++) {
+      ctx.globalAlpha = 0.15 + Math.sin(t + i) * 0.1;
+      ctx.fillStyle = i % 2 ? '#22aa88' : '#115544';
+      const bx = x + 32 + Math.cos(t + i * 1.2) * 20;
+      const by = y + 32 + Math.sin(t + i * 0.9) * 18;
+      ctx.beginPath(); ctx.arc(bx, by, 10, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Fish/amphibian body
+    ctx.fillStyle = '#118866';
+    ctx.beginPath(); ctx.moveTo(x + 16, y + 28); ctx.lineTo(x + 48, y + 24); ctx.lineTo(x + 50, y + 36); ctx.lineTo(x + 16, y + 40); ctx.fill();
+    ctx.fillStyle = '#22aa88';
+    ctx.beginPath(); ctx.moveTo(x + 18, y + 30); ctx.lineTo(x + 46, y + 26); ctx.lineTo(x + 48, y + 34); ctx.lineTo(x + 18, y + 38); ctx.fill();
+    // Big happy eyes
+    ctx.fillStyle = '#55eebb'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 6, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 42, y + 26, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff00ff'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 42, y + 26, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + 28, y + 28, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 42, y + 26, 1.5, 0, TAU); ctx.fill();
+    // Smiling mouth (creepy)
+    ctx.fillStyle = '#33ddaa';
+    ctx.beginPath(); ctx.arc(x + 34, y + 38, 6, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = '#082828'; ctx.fillRect(x + 28, y + 37, 12, 2);
+    // Fins
+    ctx.fillStyle = '#22cc99';
+    ctx.beginPath(); ctx.moveTo(x + 14, y + 30); ctx.lineTo(x + 6, y + 18); ctx.lineTo(x + 18, y + 26); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 14, y + 38); ctx.lineTo(x + 4, y + 50); ctx.lineTo(x + 18, y + 42); ctx.fill();
+  } else if (race === 'mycon') {
+    // Mycon - fungal horror, single eye, pulsating, spore tendrils
+    ctx.fillStyle = '#220011'; ctx.fillRect(x, y, W2, H2);
+    ctx.fillStyle = '#661144';
+    ctx.beginPath(); ctx.arc(x + 32, y + 34, 22, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#882255';
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 18, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#aa3366';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 14, 0, TAU); ctx.fill();
+    // Fungal ridges
+    ctx.fillStyle = '#993355';
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + frame * 0.01;
+      ctx.fillRect(x + 32 + Math.cos(a) * 10 - 2, y + 32 + Math.sin(a) * 10 - 1, 4, 2);
+    }
+    // Single glowing eye
+    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff6600'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(x + 32, y + 28, 2.5, 0, TAU); ctx.fill();
+    // Spore tendrils hanging down
+    ctx.fillStyle = '#882255';
+    for (let i = 0; i < 4; i++) {
+      const sx = x + 18 + i * 10;
+      ctx.fillRect(sx, y + 48, 3, 8 + Math.sin(frame * 0.05 + i) * 3);
+    }
+  } else if (race === 'pkunk') {
+    // Pkunk - mystical bird, colorful feathers, serene expression
+    ctx.fillStyle = '#112244'; ctx.fillRect(x, y, W2, H2);
+    // Feather crest
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath(); ctx.moveTo(x + 26, y + 20); ctx.lineTo(x + 20, y + 2); ctx.lineTo(x + 30, y + 16); ctx.fill();
+    ctx.fillStyle = '#ffaa22';
+    ctx.beginPath(); ctx.moveTo(x + 30, y + 18); ctx.lineTo(x + 32, y + 0); ctx.lineTo(x + 34, y + 14); ctx.fill();
+    ctx.fillStyle = '#44cc44';
+    ctx.beginPath(); ctx.moveTo(x + 34, y + 20); ctx.lineTo(x + 44, y + 4); ctx.lineTo(x + 38, y + 16); ctx.fill();
+    // Bird head
+    ctx.fillStyle = '#3377aa';
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 16, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#4499cc';
+    ctx.beginPath(); ctx.arc(x + 32, y + 30, 13, 0, TAU); ctx.fill();
+    // Wise eyes
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 25, y + 28, 5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 39, y + 28, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(x + 25, y + 28, 2.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 39, y + 28, 2.5, 0, TAU); ctx.fill();
+    // Beak
+    ctx.fillStyle = '#ff8822';
+    ctx.beginPath(); ctx.moveTo(x + 28, y + 36); ctx.lineTo(x + 32, y + 46); ctx.lineTo(x + 36, y + 36); ctx.fill();
+    // Wing feathers on sides
+    ctx.fillStyle = '#2266aa';
+    ctx.beginPath(); ctx.moveTo(x + 16, y + 34); ctx.lineTo(x + 4, y + 42); ctx.lineTo(x + 16, y + 44); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 48, y + 34); ctx.lineTo(x + 60, y + 42); ctx.lineTo(x + 48, y + 44); ctx.fill();
+  } else if (race === 'melnorme') {
+    // Melnorme - round orange trader, one big eye, friendly grin
+    ctx.fillStyle = '#221100'; ctx.fillRect(x, y, W2, H2);
+    // Big round body
+    ctx.fillStyle = '#886611';
+    ctx.beginPath(); ctx.arc(x + 32, y + 36, 20, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cc9922';
+    ctx.beginPath(); ctx.arc(x + 32, y + 34, 17, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ddaa33';
+    ctx.beginPath(); ctx.arc(x + 32, y + 32, 14, 0, TAU); ctx.fill();
+    // Single big eye
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(x + 32, y + 26, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 30, y + 24, 2, 2);
+    // Merchant grin
+    ctx.fillStyle = '#885511';
+    ctx.beginPath(); ctx.arc(x + 32, y + 40, 8, 0.1, Math.PI - 0.1); ctx.fill();
+    ctx.fillStyle = '#ffeecc'; ctx.fillRect(x + 26, y + 40, 12, 2);
+    // Trade hat/cap
+    ctx.fillStyle = '#664400'; ctx.fillRect(x + 18, y + 16, 28, 6);
+    ctx.fillStyle = '#885511'; ctx.fillRect(x + 22, y + 12, 20, 6);
+  }
+}
+
+// ==================== SCREEN: TITLE ====================
+function drawTitle() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  drawStarField(frame, 0, 100);
+
+  // SC2 spinning planet in center background
+  const plR = 40;
+  const plX = W/2, plY = H/2 + 20;
+  ctx.globalAlpha = 0.06; ctx.fillStyle = '#4488ff';
+  ctx.beginPath(); ctx.arc(plX, plY, plR + 20, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.12;
+  ctx.beginPath(); ctx.arc(plX, plY, plR + 10, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#112244';
+  ctx.beginPath(); ctx.arc(plX, plY, plR, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1a3366';
+  ctx.beginPath(); ctx.arc(plX, plY, plR - 2, 0, TAU); ctx.fill();
+  // Planet surface features
+  ctx.save(); ctx.beginPath(); ctx.arc(plX, plY, plR - 2, 0, TAU); ctx.clip();
+  const pRot = frame * 0.005;
+  ctx.fillStyle = '#224422'; ctx.globalAlpha = 0.6;
+  for (let c = 0; c < 6; c++) {
+    const ca = pRot + c * 1.1;
+    ctx.beginPath(); ctx.arc(plX + Math.cos(ca) * 18, plY + Math.sin(c * 2) * 12, 12 + c * 2, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 0.4; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(plX + 15, plY + 12, plR, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // SC2 style: two fleets fighting — red ships left, blue ships right
+  const ships = ['urquan','mycon','orz'];
+  const allies = ['player','spathi','pkunk'];
+  for (let si = 0; si < 3; si++) {
+    // Red fleet (enemies) — left side, flying right
+    const def = SHIP_TYPES[ships[si]];
+    const ex = 30 + Math.sin(frame * 0.02 + si * 1.5) * 12;
+    const ey = 30 + si * 28 + Math.cos(frame * 0.015 + si) * 5;
+    ctx.save(); ctx.translate(ex, ey); ctx.rotate(-Math.PI / 2); ctx.scale(0.6, 0.6);
+    def.draw({ flash: 0, thrusting: true, def, shieldTimer: 0 }); ctx.restore();
+    // Blue fleet (allies) — right side, flying left
+    const aDef = SHIP_TYPES[allies[si]];
+    const ax = W - 30 + Math.sin(frame * 0.02 + si * 1.2) * 12;
+    const ay = 30 + si * 28 + Math.cos(frame * 0.018 + si) * 5;
+    ctx.save(); ctx.translate(ax, ay); ctx.rotate(Math.PI / 2); ctx.scale(0.6, 0.6);
+    aDef.draw({ flash: 0, thrusting: true, def: aDef, shieldTimer: 0 }); ctx.restore();
+  }
+  // Weapon bolts between fleets
+  for (let b = 0; b < 5; b++) {
+    const bx = 60 + ((frame * 3 + b * 60) % (W - 120));
+    const by = 30 + (b * 37 + Math.sin(frame * 0.1 + b) * 8) % 80;
+    ctx.fillStyle = b % 2 ? '#ff4444' : '#44aaff';
+    ctx.fillRect(bx, by, 4, 2);
+  }
+
+  ctx.textAlign = 'center';
+
+  // === SC2 title block ===
+  // Top red bar
+  ctx.fillStyle = '#880000'; ctx.fillRect(W/2 - 110, 120, 220, 2);
+  // Title background
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(W/2 - 110, 122, 220, 50);
+  // "STAR CONTROL" in large red, SC2 style
+  ctx.fillStyle = '#330000'; ctx.font = 'bold 22px monospace';
+  ctx.fillText('STAR CONTROL', W/2 + 1, 140);
+  ctx.fillStyle = '#dd0000';
+  ctx.fillText('STAR CONTROL', W/2, 139);
+  // Bright red top edge on letters
+  ctx.globalAlpha = 0.5; ctx.fillStyle = '#ff4444';
+  ctx.fillRect(W/2 - 90, 125, 180, 2);
+  ctx.globalAlpha = 1;
+  // Subtitle — blue, like "The Ur-Quan Masters"
+  ctx.fillStyle = '#2244aa'; ctx.font = 'bold 11px monospace';
+  ctx.fillText('THE VOID BEYOND', W/2, 157);
+  // Blue bottom bar
+  ctx.fillStyle = '#000088'; ctx.fillRect(W/2 - 110, 162, 220, 2);
+  // Red/blue divider (SC2 iconic)
+  ctx.fillStyle = '#cc0000'; ctx.fillRect(W/2 - 110, 164, 110, 2);
+  ctx.fillStyle = '#0000cc'; ctx.fillRect(W/2, 164, 110, 2);
+
+  // Story text below
+  ctx.fillStyle = '#88aacc'; ctx.font = '8px monospace';
+  ctx.fillText('The Sa-Matra is destroyed.', W/2, 180);
+  ctx.fillText('But its explosion tore a rift', W/2, 190);
+  ctx.fillText('between dimensions...', W/2, 200);
+
+  ctx.fillStyle = '#556677'; ctx.font = '8px monospace';
+  ctx.fillText('ARROWS move  Z shoot  X special  SPACE interact', W/2, H - 14);
+
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace';
+  if (Math.floor(Date.now() / 500) % 2) ctx.fillText('PRESS ANY KEY TO START', W/2, H - 4);
+  ctx.textAlign = 'left';
+}
+
+// ==================== SCREEN: STAR MAP ====================
+function updateMap() {
+  // === SC2-style HyperSpace flight ===
+  // Player flies the ship with arrow keys, burns fuel while moving
+  const turnRate = 0.06;
+  const thrustPower = 0.4;
+  const maxHyperSpeed = 6;
+  const drag = 0.98;
+
+  if (keys['ArrowLeft'] || keys['KeyA']) hyperAngle -= turnRate;
+  if (keys['ArrowRight'] || keys['KeyD']) hyperAngle += turnRate;
+  if (keys['ArrowUp'] || keys['KeyW']) {
+    hyperVX += Math.cos(hyperAngle) * thrustPower;
+    hyperVY += Math.sin(hyperAngle) * thrustPower;
+  }
+  // Brake
+  if (keys['ArrowDown'] || keys['KeyS']) {
+    hyperVX *= 0.92; hyperVY *= 0.92;
+  }
+
+  // Speed limit
+  const spd = Math.hypot(hyperVX, hyperVY);
+  if (spd > maxHyperSpeed) {
+    hyperVX = hyperVX / spd * maxHyperSpeed;
+    hyperVY = hyperVY / spd * maxHyperSpeed;
+  }
+
+  // Apply velocity
+  hyperX += hyperVX;
+  hyperY += hyperVY;
+  hyperVX *= drag; hyperVY *= drag;
+
+  // Burn fuel while moving (1 fuel per ~60 frames of movement)
+  if (spd > 0.5) {
+    if (frame % 60 === 0 && fuel > 0) fuel--;
+    if (fuel <= 0) {
+      hyperVX *= 0.9; hyperVY *= 0.9; // slow down when out of fuel
+    }
+  }
+
+  // Camera follows ship
+  mapCamX = hyperX;
+  mapCamY = hyperY;
+
+  // Find nearest star to player ship
+  let best = null, bestD = Infinity;
+  for (let i = 0; i < starMap.length; i++) {
+    const d = dist(hyperX, hyperY, starMap[i].x, starMap[i].y);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (bestD < 80) selectedStar = best;
+  else selectedStar = null;
+
+  // Enter star system when close enough
+  if ((justPressed['Space'] || justPressed['Enter']) && selectedStar !== null && bestD < 40) {
+    const s = starMap[selectedStar];
+    currentStarIdx = selectedStar;
+    s.visited = true;
+    visitedStars.add(selectedStar);
+    sfx.warp();
+    if (s.alien && !defeatedAliens.has(selectedStar)) {
+      state = 'dialogue';
+      dialogue = { race: s.alien, stage: 'greeting', text: DIALOGUES[s.alien].greeting, starIdx: selectedStar };
+      dialogueChoice = 0;
+    } else {
+      if (selectedStar === 0) { state = 'starbase'; starbaseCursor = 0; starbaseMsg = null; }
+      else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
+    }
+  }
+
+  // === Random encounters in alien territory ===
+  hyperEncounterTimer--;
+  if (hyperEncounterTimer <= 0 && spd > 1) {
+    hyperEncounterTimer = 180 + Math.floor(Math.random() * 300); // check every 3-8 seconds
+    // Find which territory we're in
+    let inTerritory = null;
+    for (let i = 0; i < starMap.length; i++) {
+      const s = starMap[i];
+      if (s.territory && !defeatedAliens.has(i) && dist(hyperX, hyperY, s.x, s.y) < 200) {
+        inTerritory = s.territory;
+        break;
+      }
+    }
+    if (inTerritory && Math.random() < 0.3) {
+      // Random encounter!
+      state = 'dialogue';
+      dialogue = { race: inTerritory, stage: 'greeting', text: DIALOGUES[inTerritory].greeting, starIdx: -1 };
+      dialogueChoice = 0;
+      gameMessage = `${SHIP_TYPES[inTerritory].race} patrol intercepts you!`;
+      messageTimer = 90;
+    }
+  }
+}
+
+const MAP_ZOOM = 0.2; // zoomed out to see more stars
+
+function returnToHyperSpace() {
+  state = 'map';
+  hyperX = starMap[currentStarIdx].x;
+  hyperY = starMap[currentStarIdx].y;
+  hyperVX = 0; hyperVY = 0;
+  mapCamX = hyperX; mapCamY = hyperY;
+}
+function returnAfterDialogue() {
+  // If encounter was in HyperSpace (starIdx === -1), return to map
+  if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); }
+  else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
+}
+
+// HyperSpace trail particles
+let hyperTrail = [];
+
+function drawMap() {
+  const hudH = 28; // SC2 bottom HUD height
+  const mapH = H - hudH; // playable map area
+
+  // === SC2 HYPERSPACE — black background ===
+  ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, W, H);
+
+  // === Green grid (SC2's iconic HyperSpace grid) ===
+  // SC2 had bright green grid lines on pure black
+  const gridSz = 50;
+  const gox = ((-mapCamX * MAP_ZOOM) % gridSz + gridSz) % gridSz;
+  const goy = ((-mapCamY * MAP_ZOOM) % gridSz + gridSz) % gridSz;
+  // Thin grid lines
+  ctx.strokeStyle = '#003300'; ctx.lineWidth = 1;
+  for (let gx = gox; gx < W; gx += gridSz) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, mapH); ctx.stroke(); }
+  for (let gy = goy; gy < mapH; gy += gridSz) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+  // Bright intersections (SC2 had brighter dots at grid crossings)
+  ctx.fillStyle = '#005500';
+  for (let gx = gox; gx < W; gx += gridSz) {
+    for (let gy = goy; gy < mapH; gy += gridSz) {
+      ctx.fillRect(gx, gy, 1, 1);
+    }
+  }
+
+  // === HyperSpace streaks (green particles flying past when moving) ===
+  const spd = Math.hypot(hyperVX, hyperVY);
+  if (spd > 0.8) {
+    // Spawn new streak particles
+    for (let i = 0; i < Math.min(3, spd); i++) {
+      hyperTrail.push({
+        x: Math.random() * W, y: Math.random() * mapH,
+        len: 2 + spd * 2, life: 8 + Math.floor(Math.random() * 8),
+        angle: hyperAngle + Math.PI, // opposite of travel direction
+      });
+    }
+  }
+  // Draw and update streaks
+  ctx.strokeStyle = '#00aa00'; ctx.lineWidth = 1;
+  for (let i = hyperTrail.length - 1; i >= 0; i--) {
+    const t = hyperTrail[i];
+    ctx.globalAlpha = t.life / 16;
+    ctx.beginPath();
+    ctx.moveTo(t.x, t.y);
+    ctx.lineTo(t.x + Math.cos(t.angle) * t.len, t.y + Math.sin(t.angle) * t.len);
+    ctx.stroke();
+    t.x += Math.cos(t.angle) * 2;
+    t.y += Math.sin(t.angle) * 2;
+    t.life--;
+    if (t.life <= 0) hyperTrail.splice(i, 1);
+  }
+  ctx.globalAlpha = 1;
+  // Cap trail length
+  if (hyperTrail.length > 60) hyperTrail.splice(0, hyperTrail.length - 60);
+
+  const ox = mapCamX - W / 2 / MAP_ZOOM, oy = mapCamY - H / 2 / MAP_ZOOM;
+
+  // === Territory spheres of influence (SC2 style — colored filled circles) ===
+  const terr = {};
+  for (let i = 0; i < starMap.length; i++) {
+    const s = starMap[i];
+    if (s.territory) {
+      if (!terr[s.territory]) terr[s.territory] = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      terr[s.territory].minX = Math.min(terr[s.territory].minX, s.x);
+      terr[s.territory].minY = Math.min(terr[s.territory].minY, s.y);
+      terr[s.territory].maxX = Math.max(terr[s.territory].maxX, s.x);
+      terr[s.territory].maxY = Math.max(terr[s.territory].maxY, s.y);
+    }
+  }
+  for (const race in terr) {
+    const t = terr[race];
+    const tcx = (t.minX + t.maxX) / 2, tcy = (t.minY + t.maxY) / 2;
+    const tr = Math.max(140, Math.hypot(t.maxX - t.minX, t.maxY - t.minY) / 2 + 100);
+    const tsx = (tcx - ox) * MAP_ZOOM, tsy = (tcy - oy) * MAP_ZOOM, tsr = tr * MAP_ZOOM;
+    if (tsx < -tsr - 20 || tsx > W + tsr + 20 || tsy < -tsr - 20 || tsy > H + tsr + 20) continue;
+    const rc = SHIP_TYPES[race].color;
+    // SC2: solid colored sphere, fairly visible
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = rc;
+    ctx.beginPath(); ctx.arc(tsx, tsy, tsr, 0, TAU); ctx.fill();
+    // Border ring
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = rc; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(tsx, tsy, tsr, 0, TAU); ctx.stroke();
+    // Race name at top of sphere (SC2 style)
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = rc; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(SHIP_TYPES[race].race, tsx, tsy - tsr + 8);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // === Stars (SC2 style: small clean colored dots, name below) ===
+  for (let i = 0; i < starMap.length; i++) {
+    const s = starMap[i];
+    const sx = (s.x - ox) * MAP_ZOOM, sy = (s.y - oy) * MAP_ZOOM;
+    if (sx < -20 || sx > W + 20 || sy < -20 || sy > mapH + 20) continue;
+
+    // Star dot — just a clean colored pixel dot like SC2
+    ctx.fillStyle = s.color.fill;
+    const r = (i === 0) ? 3 : 2; // Sol slightly bigger
+    ctx.fillRect(Math.floor(sx) - r + 1, Math.floor(sy), r * 2 - 1, 1); // horizontal line
+    ctx.fillRect(Math.floor(sx), Math.floor(sy) - r + 1, 1, r * 2 - 1); // vertical line
+    ctx.fillRect(Math.floor(sx) - 1, Math.floor(sy) - 1, 3, 3); // center 3x3
+
+    // Star name — SC2 showed constellation name in star's color
+    ctx.fillStyle = s.color.fill; ctx.font = '6px monospace';
+    const label = s.name.split(' ');
+    ctx.fillText(label[0], sx + 5, sy + 1);
+    // Constellation suffix below in dimmer color
+    if (label[1]) {
+      ctx.fillStyle = '#224422';
+      ctx.fillText(label[1], sx + 5, sy + 8);
+    }
+
+    // Sol marker — white circle (SC2's Sol was distinctly marked)
+    if (i === 0) {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(sx, sy, 6, 0, TAU); ctx.stroke();
+    }
+
+    // Nearest star highlight — green brackets (SC2's selection cursor)
+    if (i === selectedStar) {
+      const cr = 9;
+      const bLen = 4;
+      ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      // Top-left bracket
+      ctx.moveTo(sx - cr, sy - cr + bLen); ctx.lineTo(sx - cr, sy - cr); ctx.lineTo(sx - cr + bLen, sy - cr);
+      // Top-right bracket
+      ctx.moveTo(sx + cr - bLen, sy - cr); ctx.lineTo(sx + cr, sy - cr); ctx.lineTo(sx + cr, sy - cr + bLen);
+      // Bottom-left bracket
+      ctx.moveTo(sx - cr, sy + cr - bLen); ctx.lineTo(sx - cr, sy + cr); ctx.lineTo(sx - cr + bLen, sy + cr);
+      // Bottom-right bracket
+      ctx.moveTo(sx + cr - bLen, sy + cr); ctx.lineTo(sx + cr, sy + cr); ctx.lineTo(sx + cr, sy + cr - bLen);
+      ctx.stroke();
+    }
+  }
+
+  // === Player ship (SC2 — your flagship visible in HyperSpace) ===
+  const isThrusting = keys['ArrowUp'] || keys['KeyW'];
+  ctx.save();
+  ctx.translate(W/2, H/2);
+  ctx.rotate(hyperAngle + Math.PI / 2);
+  ctx.scale(0.5, 0.5);
+  SHIP_TYPES.player.draw({ flash: 0, thrusting: isThrusting, def: SHIP_TYPES.player, shieldTimer: 0 });
+  ctx.restore();
+
+  // === SC2 BOTTOM HUD BAR ===
+  // SC2 had a solid dark bar at bottom with green text readouts
+  ctx.fillStyle = '#000800'; ctx.fillRect(0, mapH, W, hudH);
+  // Top border line (bright green)
+  ctx.fillStyle = '#00aa00'; ctx.fillRect(0, mapH, W, 1);
+  // Second darker line
+  ctx.fillStyle = '#004400'; ctx.fillRect(0, mapH + 1, W, 1);
+
+  // Fuel bar (SC2 had a visual fuel gauge)
+  const fuelBarX = 4, fuelBarY = mapH + 5, fuelBarW = 60, fuelBarH = 6;
+  ctx.fillStyle = '#001100'; ctx.fillRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
+  const fuelFrac = Math.min(1, fuel / 200);
+  ctx.fillStyle = fuelFrac > 0.25 ? '#00cc00' : '#cc4400';
+  ctx.fillRect(fuelBarX, fuelBarY, fuelBarW * fuelFrac, fuelBarH);
+  ctx.strokeStyle = '#006600'; ctx.strokeRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
+  ctx.fillStyle = '#00ff00'; ctx.font = '7px monospace';
+  ctx.fillText('FUEL', fuelBarX, fuelBarY + fuelBarH + 9);
+  ctx.fillText(fuel.toString(), fuelBarX + fuelBarW + 3, fuelBarY + 6);
+
+  // Coordinates (SC2 showed your position in HyperSpace)
+  ctx.fillStyle = '#00cc00'; ctx.font = '7px monospace';
+  const coordX = Math.floor(hyperX / 10), coordY = Math.floor(hyperY / 10);
+  ctx.fillText(`${coordX}, ${coordY}`, 80, mapH + 10);
+
+  // Speed indicator
+  ctx.fillStyle = '#008800';
+  ctx.fillText(`SPD:${spd.toFixed(1)}`, 80, mapH + 20);
+
+  // Resources
+  ctx.fillStyle = '#00ff00';
+  ctx.fillText(`CREW:${crew}/${maxCrew}`, 140, mapH + 10);
+  ctx.fillStyle = '#00cc00';
+  ctx.fillText(`MIN:${minerals}`, 140, mapH + 20);
+
+  // Artifacts
+  ctx.fillStyle = '#ffcc00';
+  ctx.fillText(`SEALS:${artifacts}/3`, 210, mapH + 10);
+
+  // Nearest star info (SC2 showed info about nearby stars in the HUD)
+  if (selectedStar !== null) {
+    const s = starMap[selectedStar];
+    const sd = dist(hyperX, hyperY, s.x, s.y);
+    ctx.fillStyle = s.color.fill; ctx.font = '7px monospace';
+    ctx.fillText(s.name, 270, mapH + 10);
+    ctx.fillStyle = '#008800';
+    ctx.fillText(`DIST:${Math.floor(sd)}`, 270, mapH + 20);
+    if (sd < 40) {
+      // Blinking "ENTER" prompt
+      if (Math.floor(frame / 15) % 2) {
+        ctx.fillStyle = '#00ff00';
+        ctx.fillText('SPACE', 330, mapH + 10);
+      }
+    }
+    if (s.territory && !defeatedAliens.has(selectedStar)) {
+      ctx.fillStyle = SHIP_TYPES[s.territory].color;
+      ctx.fillText(SHIP_TYPES[s.territory].race, 270, mapH + 26);
+    }
+  }
+
+  // Message overlay
+  if (messageTimer > 0) {
+    messageTimer--;
+    ctx.fillStyle = '#ff4444'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(gameMessage, W/2, mapH - 20);
+    ctx.textAlign = 'left';
+  }
+
+  // Module menu shortcut
+  if (justPressed['KeyU'] && minerals >= 20) {
+    state = 'upgrade';
+  }
+}
+
+// ==================== SCREEN: MODULES ====================
+let upgradeCursor = 0;
+const MAX_MODULES = 8;
+function updateUpgrade() {
+  if (justPressed['ArrowUp'] || justPressed['KeyW']) { upgradeCursor = (upgradeCursor - 1 + MODULE_DEFS.length) % MODULE_DEFS.length; sfx.select(); }
+  if (justPressed['ArrowDown'] || justPressed['KeyS']) { upgradeCursor = (upgradeCursor + 1) % MODULE_DEFS.length; sfx.select(); }
+  if (justPressed['Space'] || justPressed['Enter']) {
+    const mod = MODULE_DEFS[upgradeCursor];
+    if (modules.length < MAX_MODULES && minerals >= mod.cost) {
+      minerals -= mod.cost;
+      modules.push(mod.name);
+      if (mod.stat === 'crew') { maxCrew = 20 + getModuleStat('crew'); }
+      sfx.confirm();
+    } else {
+      sfx.alarm();
+    }
+  }
+  // Remove last module with backspace
+  if (justPressed['Backspace'] && modules.length > 0) {
+    const removed = modules.pop();
+    const mod = MODULE_DEFS.find(d => d.name === removed);
+    if (mod) minerals += Math.floor(mod.cost * 0.75); // 75% refund
+    maxCrew = 20 + getModuleStat('crew');
+    sfx.select();
+  }
+  if (justPressed['Escape'] || justPressed['KeyU'] || justPressed['KeyQ']) {
+    if (currentStarIdx === 0) { state = 'starbase'; } else { returnToHyperSpace(); }
+    sfx.select();
+  }
+}
+
+function drawUpgrade() {
+  ctx.fillStyle = 'rgba(0,0,20,0.95)'; ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 10px monospace';
+  ctx.fillText('SHIP MODULES', W/2, 16);
+  ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+  ctx.fillText(`Minerals: ${minerals}   Slots: ${modules.length}/${MAX_MODULES}`, W/2, 28);
+
+  // Available modules list (left side)
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#88aacc'; ctx.font = 'bold 8px monospace';
+  ctx.fillText('AVAILABLE', 8, 44);
+  for (let i = 0; i < MODULE_DEFS.length; i++) {
+    const mod = MODULE_DEFS[i];
+    const y = 54 + i * 17;
+    const sel = i === upgradeCursor;
+    const canBuy = minerals >= mod.cost && modules.length < MAX_MODULES;
+
+    if (sel) {
+      ctx.fillStyle = 'rgba(68,136,255,0.2)';
+      ctx.fillRect(4, y - 8, W/2 - 8, 15);
+      ctx.strokeStyle = '#4488ff'; ctx.strokeRect(4, y - 8, W/2 - 8, 15);
+    }
+
+    // Module icon dot
+    ctx.fillStyle = mod.icon; ctx.fillRect(8, y - 4, 6, 6);
+
+    // Name
+    ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = '8px monospace';
+    ctx.fillText(mod.name, 18, y + 2);
+
+    // Cost
+    ctx.fillStyle = canBuy ? '#ffcc44' : '#ff4444';
+    ctx.fillText(`${mod.cost}m`, W/2 - 32, y + 2);
+  }
+
+  // Selected module description
+  const selMod = MODULE_DEFS[upgradeCursor];
+  ctx.fillStyle = '#555'; ctx.fillRect(4, H - 30, W/2 - 8, 14);
+  ctx.fillStyle = '#ccddff'; ctx.font = '8px monospace';
+  ctx.fillText(selMod.desc, 8, H - 20);
+
+  // Installed modules (right side)
+  ctx.fillStyle = '#88aacc'; ctx.font = 'bold 8px monospace';
+  ctx.fillText('INSTALLED', W/2 + 8, 44);
+
+  // Module slots visualization
+  for (let i = 0; i < MAX_MODULES; i++) {
+    const y = 54 + i * 17;
+    const x = W/2 + 8;
+    ctx.fillStyle = i < modules.length ? 'rgba(40,80,40,0.5)' : 'rgba(20,20,40,0.5)';
+    ctx.fillRect(x, y - 8, W/2 - 16, 15);
+    ctx.strokeStyle = i < modules.length ? '#446644' : '#333';
+    ctx.strokeRect(x, y - 8, W/2 - 16, 15);
+
+    if (i < modules.length) {
+      const mod = MODULE_DEFS.find(d => d.name === modules[i]);
+      if (mod) {
+        ctx.fillStyle = mod.icon; ctx.fillRect(x + 4, y - 4, 6, 6);
+        ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
+        ctx.fillText(mod.name, x + 14, y + 2);
+      }
+    } else {
+      ctx.fillStyle = '#444'; ctx.font = '8px monospace';
+      ctx.fillText('- empty -', x + 14, y + 2);
+    }
+  }
+
+  // Controls help
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#555'; ctx.font = '8px monospace';
+  ctx.fillText('SPACE install  BACKSPACE remove  Q back', W/2, H - 4);
+  ctx.textAlign = 'left';
+}
+
+// ==================== SCREEN: STARBASE ====================
+let starbaseCursor = 0;
+let starbaseMsg = null;
+let starbaseMsgTimer = 0;
+
+const HAYES_MSGS = [
+  // Changes based on artifacts found
+];
+
+function getHayesMsg() {
+  if (artifacts >= 3) return 'Captain! You have all three Precursor Seals! Find the Orz and seal the dimensional rift! The Alliance is counting on you!';
+  if (artifacts === 2) return 'Two Seals found, Captain! One more to go. Our long-range sensors detect Orz activity increasing. We must hurry!';
+  if (artifacts === 1) return 'Good work finding that Seal, Captain. Two more remain. The Chmmr say the rift is growing wider. Be careful out there.';
+  if (defeatedAliens.size > 3) return 'You have made contact with several species, Captain. Keep exploring. The Precursor Seals are hidden at the edges of the galaxy.';
+  return 'Welcome back, Captain. Since the Sa-Matra was destroyed, a dimensional rift has opened. We need you to find three Precursor Seals to close it. Talk to the alien races - they may have information. The Starbase will always be here if you need fuel or crew.';
+}
+
+function updateStarbase() {
+  const options = 5; // Talk, Refuel, Crew, Upgrade, Depart
+  if (justPressed['ArrowUp'] || justPressed['KeyW']) { starbaseCursor = (starbaseCursor - 1 + options) % options; sfx.select(); }
+  if (justPressed['ArrowDown'] || justPressed['KeyS']) { starbaseCursor = (starbaseCursor + 1) % options; sfx.select(); }
+
+  if (justPressed['Space'] || justPressed['Enter']) {
+    if (starbaseCursor === 0) {
+      // Talk to Hayes
+      starbaseMsg = getHayesMsg();
+      starbaseMsgTimer = 180;
+      sfx.confirm();
+    } else if (starbaseCursor === 1) {
+      // Refuel
+      if (fuel < 200) {
+        fuel = 200;
+        starbaseMsg = 'Fuel tanks topped off to 200, Captain!';
+        starbaseMsgTimer = 90;
+        sfx.pickup();
+      } else {
+        starbaseMsg = 'Fuel tanks are already full.';
+        starbaseMsgTimer = 60;
+      }
+    } else if (starbaseCursor === 2) {
+      // Recruit crew (10 minerals per 5 crew)
+      if (crew >= maxCrew) {
+        starbaseMsg = 'Crew quarters are full, Captain.';
+        starbaseMsgTimer = 60;
+      } else if (minerals >= 10) {
+        minerals -= 10;
+        crew = Math.min(maxCrew, crew + 5);
+        starbaseMsg = `+5 crew recruited! (${crew}/${maxCrew})`;
+        starbaseMsgTimer = 90;
+        sfx.confirm();
+      } else {
+        starbaseMsg = 'Need 10 minerals to recruit crew.';
+        starbaseMsgTimer = 60;
+        sfx.alarm();
+      }
+    } else if (starbaseCursor === 3) {
+      // Upgrades
+      state = 'upgrade';
+      upgradeCursor = 0;
+    } else if (starbaseCursor === 4) {
+      // Depart
+      returnToHyperSpace();
+      sfx.warp();
+    }
+  }
+
+  if (justPressed['Escape'] || justPressed['KeyQ']) {
+    returnToHyperSpace(); sfx.select();
+  }
+
+  if (starbaseMsgTimer > 0) starbaseMsgTimer--;
+}
+
+function drawStarbase() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  drawStarField(0, 0, 60);
+
+  // Station body - SC2 style rotating station
+  const cx = W / 2, cy = 80;
+  const rot = frame * 0.005;
+
+  // Outer ring
+  ctx.strokeStyle = '#556677'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(cx, cy, 50, 18, 0, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Inner ring
+  ctx.strokeStyle = '#778899'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(cx, cy, 30, 10, 0, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Central hub
+  ctx.fillStyle = '#334455'; ctx.fillRect(cx - 12, cy - 16, 24, 32);
+  ctx.fillStyle = '#445566'; ctx.fillRect(cx - 10, cy - 14, 20, 28);
+  ctx.fillStyle = '#556677'; ctx.fillRect(cx - 8, cy - 12, 16, 24);
+
+  // Docking bay (lit)
+  ctx.fillStyle = '#88aacc'; ctx.fillRect(cx - 4, cy + 10, 8, 6);
+  ctx.fillStyle = '#aaccee'; ctx.fillRect(cx - 2, cy + 12, 4, 2);
+
+  // Antenna
+  ctx.fillStyle = '#667788'; ctx.fillRect(cx - 1, cy - 24, 2, 12);
+  ctx.fillStyle = '#ff4444'; ctx.fillRect(cx - 2, cy - 26, 4, 3);
+
+  // Blinking lights on ring
+  for (let i = 0; i < 8; i++) {
+    const a = rot + i * TAU / 8;
+    const lx = cx + Math.cos(a) * 50;
+    const ly = cy + Math.sin(a) * 18;
+    ctx.fillStyle = (Math.floor(frame / 15) + i) % 3 === 0 ? '#ff4444' : '#44ff44';
+    ctx.fillRect(lx - 1, ly - 1, 2, 2);
+  }
+
+  // Solar panels
+  ctx.fillStyle = '#334466';
+  ctx.fillRect(cx - 50, cy - 4, 18, 8);
+  ctx.fillRect(cx + 32, cy - 4, 18, 8);
+  // Panel grid lines
+  ctx.strokeStyle = '#4488cc'; ctx.lineWidth = 0.5;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.moveTo(cx - 50, cy - 2 + i * 3); ctx.lineTo(cx - 32, cy - 2 + i * 3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + 32, cy - 2 + i * 3); ctx.lineTo(cx + 50, cy - 2 + i * 3); ctx.stroke();
+  }
+  ctx.lineWidth = 1;
+
+  // Title
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 10px monospace';
+  ctx.fillText('EARTH STARBASE', cx, cy + 36);
+  ctx.fillStyle = '#667788'; ctx.font = '8px monospace';
+  ctx.fillText('Commander Hayes reporting', cx, cy + 46);
+
+  // Menu options
+  const menuItems = [
+    { label: 'TALK TO COMMANDER HAYES', icon: '>' },
+    { label: `REFUEL (free) [${fuel}/200]`, icon: '>' },
+    { label: `RECRUIT CREW (10 min) [${crew}/${maxCrew}]`, icon: '>' },
+    { label: `INSTALL MODULES [${modules.length}/${MAX_MODULES}]`, icon: '>' },
+    { label: 'DEPART STARBASE', icon: '>' },
+  ];
+
+  for (let i = 0; i < menuItems.length; i++) {
+    const my = 140 + i * 16;
+    const sel = i === starbaseCursor;
+    ctx.fillStyle = sel ? 'rgba(68,136,255,0.15)' : 'rgba(0,0,20,0.4)';
+    ctx.fillRect(30, my - 6, W - 60, 14);
+    if (sel) { ctx.strokeStyle = '#4488ff'; ctx.strokeRect(30, my - 6, W - 60, 14); }
+    ctx.fillStyle = sel ? '#fff' : '#aaa'; ctx.font = '8px monospace';
+    ctx.fillText((sel ? '> ' : '  ') + menuItems[i].label, W / 2, my + 2);
+  }
+
+  // Status bar at bottom
+  ctx.fillStyle = 'rgba(0,0,20,0.7)'; ctx.fillRect(0, H - 30, W, 30);
+  ctx.fillStyle = '#4488ff'; ctx.font = '8px monospace';
+  ctx.fillText(`FUEL: ${fuel}`, W / 2 - 100, H - 20);
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText(`MINERALS: ${minerals}`, W / 2 - 30, H - 20);
+  ctx.fillStyle = '#44ff88';
+  ctx.fillText(`CREW: ${crew}/${maxCrew}`, W / 2 + 50, H - 20);
+  ctx.fillStyle = '#ff8844';
+  ctx.fillText(`SEALS: ${artifacts}/3`, W / 2 - 100, H - 10);
+
+  // Message from Hayes
+  if (starbaseMsg && starbaseMsgTimer > 0) {
+    ctx.fillStyle = 'rgba(0,0,40,0.9)';
+    ctx.fillRect(10, 100, W - 20, 34);
+    ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 1;
+    ctx.strokeRect(10, 100, W - 20, 34);
+    ctx.fillStyle = '#88bbff'; ctx.font = '8px monospace';
+    // Wrap hayes message
+    const words = starbaseMsg.split(' ');
+    let line = '', ty = 110;
+    for (const word of words) {
+      const test = line + word + ' ';
+      if (test.length > 38) {
+        ctx.fillText(line, W / 2, ty);
+        line = word + ' '; ty += 10;
+      } else {
+        line = test;
+      }
+    }
+    ctx.fillText(line, W / 2, ty);
+  }
+
+  ctx.fillStyle = '#555'; ctx.font = '8px monospace';
+  ctx.fillText('ARROWS select  SPACE choose  Q leave', W / 2, H - 2);
+  ctx.textAlign = 'left';
+}
+
+// ==================== SCREEN: ORBIT ====================
+let orbitCursor = 0;
+let scanTimer = 0;
+
+function updateOrbit() {
+  const s = starMap[currentStarIdx];
+  if (justPressed['ArrowLeft'] || justPressed['KeyA']) { orbitCursor = (orbitCursor - 1 + s.planets.length) % s.planets.length; sfx.select(); }
+  if (justPressed['ArrowRight'] || justPressed['KeyD']) { orbitCursor = (orbitCursor + 1) % s.planets.length; sfx.select(); }
+
+  // Scan planet
+  if (keys['Space'] || keys['Enter']) {
+    const p = s.planets[orbitCursor];
+    if (!p.scanned) {
+      scanTimer++;
+      if (scanTimer >= 40) {
+        p.scanned = true;
+        minerals += p.minerals;
+        fuel += p.fuel;
+        scanTimer = 0;
+        sfx.pickup();
+        gameMessage = `+${p.minerals} minerals, +${p.fuel} fuel`;
+        messageTimer = 60;
+      }
+    }
+  } else {
+    scanTimer = 0;
+  }
+
+  // Collect artifact
+  if (s.artifact && !defeatedAliens.has(currentStarIdx) && s.alien) {
+    // Need to defeat alien first
+  } else if (s.artifact && justPressed['KeyC']) {
+    s.artifact = false;
+    artifacts++;
+    sfx.victory();
+    gameMessage = `PRECURSOR SEAL RECOVERED! (${artifacts}/3)`;
+    messageTimer = 120;
+    if (artifacts >= 3) {
+      gameMessage = 'ALL SEALS FOUND! Close the rift - find the Orz!';
+      messageTimer = 180;
+    }
+  }
+
+  if (justPressed['Escape'] || justPressed['KeyQ']) { returnToHyperSpace(); sfx.select(); }
+}
+
+function drawOrbit() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  drawStarField(currentStarIdx * 100, currentStarIdx * 77, 60);
+  const s = starMap[currentStarIdx];
+
+  // Central star - SC2 style with corona
+  // Outer corona
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = s.color.glow;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 45, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.15;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 35, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.25;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 25, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Star body
+  ctx.fillStyle = s.color.fill;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 16, 0, TAU); ctx.fill();
+  // Bright center
+  ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 8, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Solar flares
+  ctx.fillStyle = s.color.glow; ctx.globalAlpha = 0.4;
+  for (let f = 0; f < 4; f++) {
+    const fa = frame * 0.01 + f * 1.5;
+    const fr = 18 + Math.sin(frame * 0.05 + f * 2) * 4;
+    ctx.beginPath(); ctx.arc(W/2 + Math.cos(fa) * fr, H/2 + Math.sin(fa) * fr, 4, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Planets orbiting
+  for (let i = 0; i < s.planets.length; i++) {
+    const p = s.planets[i];
+    const orbitR = 40 + i * Math.min(28, 180 / s.planets.length);
+    const angle = frame * 0.005 * (1 + i * 0.3) + i * 2;
+    const px = W/2 + Math.cos(angle) * orbitR;
+    const py = H/2 + Math.sin(angle) * orbitR * 0.5;
+
+    // Orbit line
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(W/2, H/2, orbitR, orbitR * 0.5, 0, 0, TAU); ctx.stroke();
+
+    // Planet - SC2 style with surface detail
+    const sel = i === orbitCursor;
+    const baseR = (p.radius || 10) * 0.5;
+    const r = sel ? baseR + 2 : baseR;
+    // Atmosphere glow
+    if (sel) {
+      ctx.globalAlpha = 0.15; ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(px, py, r + 4, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // Planet body
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill();
+    // Surface features (craters/continents)
+    ctx.save(); ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.clip();
+    const pRot = frame * 0.006 + i * 3;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px + Math.cos(pRot) * r * 0.4, py - r * 0.3, r * 0.3, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(px + Math.cos(pRot + 1.5) * r * 0.3, py + r * 0.2, r * 0.25, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + Math.cos(pRot + 3) * r * 0.5, py - r * 0.1, r * 0.2, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // Shadow gradient
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(px + r * 0.3, py + r * 0.3, r, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Specular
+    ctx.globalAlpha = 0.25; ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px - r * 0.3, py - r * 0.3, r * 0.3, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if (sel) {
+      ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(px, py, r + 4, 0, TAU); ctx.stroke();
+    }
+
+    // Planet label
+    ctx.fillStyle = sel ? '#fff' : '#888'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(p.name, px, py + r + 8);
+    if (p.scanned) {
+      ctx.fillStyle = '#44ff44'; ctx.fillText('SCANNED', px, py + r + 14);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // Scan progress bar
+  if (scanTimer > 0) {
+    const p = s.planets[orbitCursor];
+    if (!p.scanned) {
+      ctx.fillStyle = '#222'; ctx.fillRect(W/2 - 30, H - 40, 60, 6);
+      ctx.fillStyle = '#44aaff'; ctx.fillRect(W/2 - 30, H - 40, 60 * (scanTimer / 40), 6);
+      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('SCANNING...', W/2, H - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // SC2-style planet scan panel (right side)
+  const p = s.planets[orbitCursor];
+  const panX = W - 105, panY = 4, panW2 = 101, panH2 = 120;
+  ctx.fillStyle = 'rgba(0,0,20,0.85)'; ctx.fillRect(panX, panY, panW2, panH2);
+  ctx.strokeStyle = '#336'; ctx.lineWidth = 1; ctx.strokeRect(panX, panY, panW2, panH2);
+  // Planet close-up (big rotating planet)
+  const ppx = panX + 50, ppy = panY + 38, ppr = 28;
+  ctx.fillStyle = p.color;
+  ctx.beginPath(); ctx.arc(ppx, ppy, ppr, 0, TAU); ctx.fill();
+  // Rotating surface
+  ctx.save(); ctx.beginPath(); ctx.arc(ppx, ppy, ppr, 0, TAU); ctx.clip();
+  const pRot2 = frame * 0.01;
+  for (let ci = 0; ci < 5; ci++) {
+    const ca = pRot2 + ci * 1.3;
+    const cx2 = ppx + Math.cos(ca) * ppr * 0.5;
+    const cy2 = ppy + Math.sin(ci * 2) * ppr * 0.3;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = ci % 2 ? '#fff' : '#000';
+    ctx.beginPath(); ctx.arc(cx2, cy2, ppr * 0.2 + ci * 2, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1; ctx.restore();
+  // Shadow
+  ctx.globalAlpha = 0.35; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(ppx + 8, ppy + 6, ppr, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.2; ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(ppx - 8, ppy - 8, ppr * 0.35, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Scan data text
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 8px monospace';
+  ctx.fillText(p.name, panX + 4, panY + 74);
+  ctx.fillStyle = '#8888aa'; ctx.font = '8px monospace';
+  ctx.fillText(p.type || 'Unknown', panX + 4, panY + 83);
+  if (p.scanned) {
+    ctx.fillStyle = '#44ff44'; ctx.fillText('COLLECTED', panX + 4, panY + 93);
+  } else {
+    ctx.fillStyle = '#ffcc44';
+    ctx.fillText(`Minerals: ${p.minerals}`, panX + 4, panY + 93);
+    ctx.fillText(`Fuel: ${p.fuel}`, panX + 4, panY + 103);
+    ctx.fillStyle = '#88aaff';
+    ctx.fillText('SPACE to scan', panX + 4, panY + 114);
+  }
+
+  // Star info panel (left side)
+  ctx.fillStyle = 'rgba(0,0,20,0.7)'; ctx.fillRect(4, 4, 80, 30);
+  ctx.strokeStyle = '#336'; ctx.strokeRect(4, 4, 80, 30);
+  ctx.fillStyle = s.color.fill; ctx.font = 'bold 8px monospace';
+  ctx.fillText(s.name, 8, 14);
+  ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+  ctx.fillText(`${s.planets.length} planet${s.planets.length > 1 ? 's' : ''}`, 8, 26);
+
+  // Artifact indicator
+  if (s.artifact) {
+    ctx.fillStyle = '#ff8844'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    if (s.alien && !defeatedAliens.has(currentStarIdx)) {
+      ctx.fillText('PRECURSOR SEAL - Defeat guardian first!', W/2, 20);
+    } else {
+      ctx.fillText('PRECURSOR SEAL! Press C to collect!', W/2, 20);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // HUD bar
+  ctx.fillStyle = 'rgba(0,0,20,0.7)'; ctx.fillRect(0, H - 14, W, 14);
+  ctx.fillStyle = '#4488ff'; ctx.font = '8px monospace';
+  ctx.fillText(`FUEL:${fuel}`, 4, H - 4);
+  ctx.fillStyle = '#ffcc44'; ctx.fillText(`MIN:${minerals}`, 55, H - 4);
+  ctx.fillStyle = '#44ff88'; ctx.fillText(`CREW:${crew}`, 110, H - 4);
+  ctx.fillStyle = '#555'; ctx.textAlign = 'right';
+  ctx.fillText('LEFT/RIGHT planets  SPACE scan  Q back', W - 4, H - 4);
+  ctx.textAlign = 'left';
+
+  // Message
+  if (messageTimer > 0) {
+    messageTimer--;
+    ctx.fillStyle = '#ffcc44'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(gameMessage, W/2, H/2 + 60);
+    ctx.textAlign = 'left';
+  }
+}
+
+// ==================== SCREEN: DIALOGUE ====================
+function updateDialogue() {
+  const d = DIALOGUES[dialogue.race];
+  if (dialogue.stage === 'greeting') {
+    const choices = d.choices;
+    if (justPressed['ArrowUp'] || justPressed['KeyW']) { dialogueChoice = (dialogueChoice - 1 + choices.length) % choices.length; sfx.select(); }
+    if (justPressed['ArrowDown'] || justPressed['KeyS']) { dialogueChoice = (dialogueChoice + 1) % choices.length; sfx.select(); }
+    if (justPressed['Space'] || justPressed['Enter']) {
+      const choice = choices[dialogueChoice];
+      dialogue.stage = 'response';
+      dialogue.text = choice.response;
+      dialogue.action = choice.action;
+      dialogue.cost = choice.cost;
+      dialogue.give = choice.give;
+      sfx.confirm();
+    }
+  } else if (dialogue.stage === 'response') {
+    if (justPressed['Space'] || justPressed['Enter']) {
+      const act = dialogue.action;
+      if (act === 'fight' || act === 'spar') {
+        state = 'combat';
+        initCombat(dialogue.race);
+        music.play(dialogue.race === 'orz' ? 'boss' : 'combat');
+      } else if (act === 'trade') {
+        if (minerals >= (dialogue.cost || 0)) {
+          minerals -= dialogue.cost;
+          defeatedAliens.add(dialogue.starIdx);
+          gameMessage = 'Trade successful. They will let you pass.';
+          messageTimer = 90;
+        } else {
+          gameMessage = 'Not enough minerals!';
+          messageTimer = 60;
+        }
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'swtrade') {
+        if (minerals >= (dialogue.cost || 0)) {
+          minerals -= dialogue.cost;
+          fuel += dialogue.give || 0;
+          defeatedAliens.add(dialogue.starIdx);
+          gameMessage = `Traded ${dialogue.cost} minerals for ${dialogue.give} fuel!`;
+          messageTimer = 90;
+        } else {
+          gameMessage = 'Not enough minerals!';
+          messageTimer = 60;
+        }
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'heal') {
+        crew = Math.min(maxCrew, crew + 10);
+        defeatedAliens.add(dialogue.starIdx);
+        gameMessage = '+10 crew restored!';
+        messageTimer = 90;
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'fuel') {
+        fuel += 30;
+        defeatedAliens.add(dialogue.starIdx);
+        gameMessage = '+30 fuel!';
+        messageTimer = 90;
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'minerals') {
+        minerals += 30;
+        defeatedAliens.add(dialogue.starIdx);
+        gameMessage = '+30 minerals!';
+        messageTimer = 90;
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'flee') {
+        returnToHyperSpace(); sfx.warp();
+      } else {
+        // info - just dismiss
+        returnAfterDialogue(); sfx.confirm();
+      }
+    }
+  }
+}
+
+function drawDialogue() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  const d = DIALOGUES[dialogue.race];
+  const raceColor = SHIP_TYPES[dialogue.race].color;
+
+  // === SC2 Comm Screen Layout ===
+  // Portrait fills entire left half (SC2 style — big alien face)
+  const portW = Math.floor(W * 0.45);
+  const portH = Math.floor(H * 0.7);
+
+  // Portrait background — race-tinted dark
+  ctx.fillStyle = '#060610'; ctx.fillRect(0, 0, portW, portH);
+  // Draw portrait scaled up to fill the area
+  ctx.save();
+  ctx.beginPath(); ctx.rect(2, 2, portW - 4, portH - 4); ctx.clip();
+  const pScale = Math.min((portW - 8) / 64, (portH - 8) / 64);
+  ctx.translate(portW / 2 - 32 * pScale, portH / 2 - 32 * pScale);
+  ctx.scale(pScale, pScale);
+  drawAlienPortrait(dialogue.race, 0, 0);
+  ctx.restore();
+  // SC2 comm border — double line in race color
+  ctx.strokeStyle = raceColor; ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, portW - 2, portH - 2);
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+  ctx.strokeRect(3, 3, portW - 6, portH - 6);
+
+  // Talking animation — slight portrait wobble
+  const talkBob = Math.sin(frame * 0.15) * 0.5;
+
+  // Race name plate (below portrait, SC2 style)
+  ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, portH, portW, H - portH);
+  ctx.strokeStyle = raceColor; ctx.lineWidth = 1;
+  ctx.strokeRect(0, portH, portW, H - portH);
+  ctx.fillStyle = raceColor; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(SHIP_TYPES[dialogue.race].race.toUpperCase(), portW / 2, portH + 14);
+  // Ship sprite
+  ctx.save(); ctx.translate(portW / 2, portH + 38); ctx.scale(0.7, 0.7);
+  SHIP_TYPES[dialogue.race].draw({ flash: 0, thrusting: false, def: SHIP_TYPES[dialogue.race], shieldTimer: 0 });
+  ctx.restore();
+  ctx.textAlign = 'left';
+
+  // === Right side: Text area (SC2 comm style) ===
+  const textX = portW + 4;
+  const textW2 = W - portW - 8;
+
+  // SC2 speech area — dark blue background with race-colored border
+  ctx.fillStyle = '#04041a'; ctx.fillRect(textX, 0, textW2, portH);
+  ctx.strokeStyle = '#222'; ctx.strokeRect(textX, 0, textW2, portH);
+  // Top accent line
+  ctx.fillStyle = raceColor; ctx.fillRect(textX, 0, textW2, 2);
+
+  // SC2-style alien voice — play vocal syllables periodically
+  if (frame % 25 === 0) {
+    sfx.alienVoice(dialogue.race);
+  }
+
+  // SC2 green/race-colored alien speech text
+  ctx.fillStyle = '#33ff33'; ctx.font = '8px monospace';
+  const words = dialogue.text.split(' ');
+  let line = '', y = 16;
+  const maxChars = Math.floor(textW2 / 5) - 1;
+  for (const word of words) {
+    const test = line + word + ' ';
+    if (test.length > maxChars) {
+      ctx.fillText(line, textX + 6, y);
+      line = word + ' '; y += 10;
+    } else {
+      line = test;
+    }
+  }
+  ctx.fillText(line, textX + 6, y);
+
+  // Choices or continue prompt
+  if (dialogue.stage === 'greeting') {
+    const choices = d.choices;
+    const choiceY0 = Math.max(y + 16, portH * 0.45);
+    // SC2 style: player responses in different color
+    ctx.fillStyle = '#224488'; ctx.fillRect(textX, choiceY0 - 6, textW2, portH - choiceY0 + 6);
+    ctx.fillStyle = raceColor; ctx.fillRect(textX, choiceY0 - 6, textW2, 1);
+    for (let i = 0; i < choices.length; i++) {
+      const cy = choiceY0 + i * 18;
+      const sel = i === dialogueChoice;
+      if (sel) {
+        ctx.fillStyle = 'rgba(68,136,255,0.25)';
+        ctx.fillRect(textX + 2, cy - 2, textW2 - 4, 16);
+      }
+      ctx.fillStyle = sel ? '#ffcc00' : '#8888cc'; ctx.font = '8px monospace';
+      const cText = (sel ? '\u25B6 ' : '  ') + choices[i].text;
+      // Word wrap choices
+      if (cText.length > maxChars) {
+        ctx.fillText(cText.substring(0, maxChars), textX + 6, cy + 6);
+        ctx.fillText('  ' + cText.substring(maxChars), textX + 6, cy + 14);
+      } else {
+        ctx.fillText(cText, textX + 6, cy + 8);
+      }
+    }
+  } else {
+    ctx.fillStyle = '#ffcc00'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    if (Math.floor(Date.now() / 400) % 2) ctx.fillText('- SPACE to continue -', textX + textW2 / 2, portH - 10);
+    ctx.textAlign = 'left';
+  }
+
+  // Bottom status bar (SC2 style)
+  ctx.fillStyle = '#0a0a1a'; ctx.fillRect(portW, portH, textW2 + 8, H - portH);
+  ctx.strokeStyle = '#333'; ctx.strokeRect(portW, portH, textW2 + 8, H - portH);
+  // Player ship info
+  ctx.fillStyle = '#4488ff'; ctx.font = '8px monospace';
+  ctx.fillText(`Crew: ${crew}`, portW + 8, portH + 14);
+  ctx.fillText(`Fuel: ${fuel}`, portW + 8, portH + 24);
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText(`Minerals: ${minerals}`, portW + 70, portH + 14);
+  ctx.fillText(`Artifacts: ${artifacts}/3`, portW + 70, portH + 24);
+  // Controls
+  ctx.fillStyle = '#444'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('UP/DOWN select  SPACE confirm', W / 2 + portW / 4, H - 4);
+  ctx.textAlign = 'left';
+}
+
+// ==================== SCREEN: COMBAT ====================
+function updateCombat() {
+  // Player input
+  if (keys['ArrowLeft'] || keys['KeyA']) playerShip.turnLeft();
+  if (keys['ArrowRight'] || keys['KeyD']) playerShip.turnRight();
+  if (keys['ArrowUp'] || keys['KeyW']) playerShip.thrustForward();
+  if (keys['KeyZ']) playerShip.fire();
+  if (justPressed['KeyX']) playerShip.useSpecial();
+
+  // AI
+  if (enemyShip.alive) updateAI(enemyShip, playerShip);
+
+  // Update ships
+  playerShip.update();
+  enemyShip.update();
+
+  // Update projectiles
+  for (const p of projectiles) {
+    // Homing
+    if (p.homing && p.target && p.target.alive) {
+      const a = angleTo(p.x, p.y, p.target.x, p.target.y);
+      p.vx += Math.cos(a) * 0.15;
+      p.vy += Math.sin(a) * 0.15;
+      const spd = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+      if (spd > 6) { p.vx *= 6/spd; p.vy *= 6/spd; }
+    }
+    // Gravity bomb pulls
+    if (p.gravBomb) {
+      const target = p.owner === playerShip ? enemyShip : playerShip;
+      const dx = p.x - target.x, dy = p.y - target.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d > 10 && d < 150) {
+        target.vx += (dx/d) * 2 / d * 50;
+        target.vy += (dy/d) * 2 / d * 50;
+      }
+    }
+    p.x += p.vx; p.y += p.vy; p.life--;
+    // Wrap
+    const ARENA = 400;
+    if (p.x < -ARENA) p.x += ARENA*2;
+    if (p.x > ARENA) p.x -= ARENA*2;
+    if (p.y < -ARENA) p.y += ARENA*2;
+    if (p.y > ARENA) p.y -= ARENA*2;
+  }
+
+  // Collision: projectiles vs ships
+  // Point defense module — auto-destroy nearby enemy projectiles
+  if (playerShip.hasPointDef) {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      if (p.owner !== playerShip && !p.gravBomb && dist(p.x, p.y, playerShip.x, playerShip.y) < 40) {
+        spawnParticles(p.x, p.y, '#aaaaff', 3, 1);
+        projectiles.splice(i, 1);
+      }
+    }
+  }
+
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    if (p.life <= 0) { projectiles.splice(i, 1); continue; }
+    // vs player
+    if (p.owner !== playerShip && dist(p.x, p.y, playerShip.x, playerShip.y) < 12 && !p.gravBomb) {
+      playerShip.takeDamage(p.damage);
+      spawnParticles(p.x, p.y, '#ff8844', 5, 2);
+      projectiles.splice(i, 1); sfx.hit(); continue;
+    }
+    // vs enemy
+    if (p.owner !== enemyShip && dist(p.x, p.y, enemyShip.x, enemyShip.y) < 12 && !p.gravBomb) {
+      enemyShip.takeDamage(p.damage);
+      spawnParticles(p.x, p.y, '#ff8844', 5, 2);
+      projectiles.splice(i, 1); sfx.hit(); continue;
+    }
+    // Drone collision
+    const droneOwner = p.owner === playerShip ? enemyShip : playerShip;
+    for (const d of droneOwner.drones) {
+      if (dist(p.x, p.y, d.x, d.y) < 8 && !p.gravBomb) {
+        d.life = 0; projectiles.splice(i, 1); sfx.hit();
+        spawnParticles(d.x, d.y, '#ffff44', 5, 2);
+        break;
+      }
+    }
+  }
+
+  // Drone damage
+  for (const d of playerShip.drones) {
+    if (dist(d.x, d.y, enemyShip.x, enemyShip.y) < 14) {
+      enemyShip.takeDamage(1);
+      d.life = 0;
+      spawnParticles(d.x, d.y, '#ffff44', 5, 2);
+      sfx.hit();
+    }
+  }
+  for (const d of enemyShip.drones) {
+    if (dist(d.x, d.y, playerShip.x, playerShip.y) < 14) {
+      playerShip.takeDamage(1);
+      d.life = 0;
+      spawnParticles(d.x, d.y, '#ffff44', 5, 2);
+      sfx.hit();
+    }
+  }
+
+  // Particles
+  for (const p of particles) p.update();
+  particles = particles.filter(p => p.life > 0);
+
+  // Check win/lose
+  if (!playerShip.alive) {
+    crew = 0;
+    sfx.explode();
+    spawnParticles(playerShip.x, playerShip.y, '#ff4400', 30, 5);
+    setTimeout(() => { state = 'gameover'; music.stop(); sfx.defeat(); }, 1500);
+    playerShip.alive = true; playerShip.crew = -1; // prevent re-trigger
+  }
+  if (!enemyShip.alive && enemyShip.crew === 0) {
+    sfx.explode();
+    spawnParticles(enemyShip.x, enemyShip.y, enemyShip.def.color, 30, 5);
+    enemyShip.crew = -1; // prevent re-trigger
+    defeatedAliens.add(dialogue ? dialogue.starIdx : -1);
+    crew = playerShip.crew;
+    // Check if this was the final boss
+    if (enemyShip.type === 'orz' && artifacts >= 3) {
+      setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 2000);
+    } else {
+      setTimeout(() => {
+        // Return to orbit if at a star, hyperspace if random encounter
+        if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); }
+        else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
+        music.play('map');
+        gameMessage = `${enemyShip.def.race} defeated! +50 minerals`;
+        minerals += 50;
+        messageTimer = 90;
+      }, 1500);
+    }
+  }
+}
+
+function drawCombat() {
+  // Screen shake
+  let shaking = screenShake > 0;
+  if (shaking) {
+    ctx.save();
+    ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
+    screenShake--;
+  }
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  // Camera centered on midpoint between ships, with dynamic zoom
+  const shipDist = Math.hypot(playerShip.x - enemyShip.x, playerShip.y - enemyShip.y);
+  // Zoom: 0.5 when close, down to 0.28 when far apart
+  const targetZoom = Math.max(0.28, Math.min(0.5, 140 / Math.max(shipDist, 1)));
+  if (!window._combatZoom) window._combatZoom = 0.5;
+  window._combatZoom += (targetZoom - window._combatZoom) * 0.05;
+  const zoom = window._combatZoom;
+
+  // cx/cy: camera offset so midpoint of ships is at screen center
+  // At zoom < 1, we see more world, so expand the offset
+  const cx = (playerShip.x + enemyShip.x) / 2 - W / (2 * zoom);
+  const cy = (playerShip.y + enemyShip.y) / 2 - H / (2 * zoom);
+
+  // Apply zoom: scale all world drawing around top-left, with cx/cy adjusted for zoom
+  ctx.save();
+  ctx.scale(zoom, zoom);
+
+  drawStarField(cx, cy, 60);
+
+  // Planet - SC2 style colorful rotating planet
+  if (combatPlanet) {
+    const px = combatPlanet.x - cx, py = combatPlanet.y - cy;
+    const R = PLANET_RADIUS;
+    // Atmosphere glow
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = '#4488ff';
+    ctx.beginPath(); ctx.arc(px, py, R + 8, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#2266cc';
+    ctx.beginPath(); ctx.arc(px, py, R + 4, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Planet base - blue/green world
+    ctx.fillStyle = '#1144aa';
+    ctx.beginPath(); ctx.arc(px, py, R, 0, TAU); ctx.fill();
+    // Continents (rotating with time)
+    ctx.save();
+    ctx.beginPath(); ctx.arc(px, py, R, 0, TAU); ctx.clip();
+    const rot = frame * 0.008;
+    ctx.fillStyle = '#228833';
+    ctx.beginPath(); ctx.arc(px + Math.cos(rot) * 8, py - 4, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#33aa44';
+    ctx.beginPath(); ctx.arc(px + Math.cos(rot + 1.5) * 10, py + 5, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#44bb55';
+    ctx.beginPath(); ctx.arc(px + Math.cos(rot + 3) * 6, py - 8, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cc9944';
+    ctx.beginPath(); ctx.arc(px + Math.cos(rot + 4) * 9, py + 3, 3, 0, TAU); ctx.fill();
+    // Ice caps
+    ctx.fillStyle = '#ddeeff';
+    ctx.fillRect(px - 6, py - R + 1, 12, 3);
+    ctx.fillRect(px - 4, py + R - 4, 8, 3);
+    // Cloud wisps
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(px + Math.cos(rot * 1.3) * 8 - 6, py - 5, 12, 2);
+    ctx.fillRect(px + Math.cos(rot * 1.3 + 2) * 6 - 4, py + 6, 8, 2);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // Light/shadow gradient
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(px + 5, py + 4, R, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Specular highlight
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px - 6, py - 6, R * 0.35, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Projectiles
+  for (const p of projectiles) {
+    const sx = p.x - cx, sy = p.y - cy;
+    if (p.gravBomb) {
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(sx, sy, 8 + Math.sin(frame * 0.2) * 3, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(sx, sy, 2, 0, TAU); ctx.fill();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.fillRect(sx - p.size/2, sy - p.size/2, p.size, p.size);
+      // Trail
+      ctx.globalAlpha = 0.3;
+      ctx.fillRect(sx - p.vx - p.size/2, sy - p.vy - p.size/2, p.size, p.size);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Drones
+  for (const ship of [playerShip, enemyShip]) {
+    for (const d of ship.drones) {
+      ctx.fillStyle = ship.def.color;
+      ctx.fillRect(d.x - cx - 2, d.y - cy - 2, 4, 4);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(d.x - cx - 1, d.y - cy - 1, 2, 2);
+    }
+  }
+
+  // Ships
+  if (playerShip.crew >= 0) playerShip.draw(cx, cy);
+  if (enemyShip.crew >= 0) enemyShip.draw(cx, cy);
+
+  // Particles
+  for (const p of particles) p.draw(cx, cy);
+
+  // End zoom transform (HUD drawn at screen scale)
+  ctx.restore();
+
+  // Off-screen enemy direction arrow (screen coords after zoom)
+  const esx = (enemyShip.x - cx) * zoom, esy = (enemyShip.y - cy) * zoom;
+  if (esx < -20 || esx > W + 20 || esy < -20 || esy > H + 20) {
+    const ang = Math.atan2(esy - H/2, esx - W/2);
+    const ax = W/2 + Math.cos(ang) * Math.min(W/2 - 44, H/2 - 20);
+    const ay = H/2 + Math.sin(ang) * Math.min(W/2 - 44, H/2 - 20);
+    ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
+    ctx.fillStyle = Math.floor(Date.now()/200)%2 ? '#ff4444' : '#ff8888';
+    ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-6, -6); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // === SC2 Super Melee HUD ===
+  // Player panel (left side, vertical) - ship icon + crew + battery
+  const panelW = 36, panelH = H;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, panelW, panelH);
+  ctx.strokeStyle = '#334'; ctx.strokeRect(0, 0, panelW, panelH);
+
+  // Player ship mini portrait
+  ctx.fillStyle = '#111'; ctx.fillRect(2, 2, 32, 32);
+  ctx.strokeStyle = playerShip.def.color; ctx.strokeRect(2, 2, 32, 32);
+  ctx.save(); ctx.translate(18, 18); ctx.scale(0.8, 0.8);
+  playerShip.def.draw({ flash: 0, thrusting: false, def: playerShip.def, shieldTimer: 0 });
+  ctx.restore();
+
+  // Player ship name
+  ctx.fillStyle = playerShip.def.color; ctx.font = '8px monospace';
+  ctx.save(); ctx.translate(6, 44); ctx.fillText(playerShip.def.name.substring(0, 5), 0, 0); ctx.restore();
+
+  // Player crew dots (SC2 style column)
+  const pCrew = Math.max(0, playerShip.crew);
+  for (let i = 0; i < playerShip.def.maxCrew; i++) {
+    const dx = 3 + (i % 4) * 8, dy = 50 + Math.floor(i / 4) * 6;
+    ctx.fillStyle = i < pCrew ? '#44ff88' : '#1a1a1a';
+    ctx.fillRect(dx, dy, 6, 4);
+    if (i < pCrew) { ctx.fillStyle = '#88ffbb'; ctx.fillRect(dx, dy, 3, 2); }
+  }
+
+  // Player energy battery (SC2 segmented bar)
+  const pBatY = H - 60;
+  ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+  ctx.fillText('BAT', 4, pBatY - 4);
+  const pSegs = 10;
+  const pEFrac = playerShip.energy / playerShip.def.maxEnergy;
+  for (let i = 0; i < pSegs; i++) {
+    const by = pBatY + (pSegs - 1 - i) * 5;
+    ctx.fillStyle = i / pSegs < pEFrac ? '#4488ff' : '#111';
+    ctx.fillRect(4, by, 28, 4);
+    if (i / pSegs < pEFrac) {
+      ctx.fillStyle = '#66aaff'; ctx.fillRect(4, by, 28, 2);
+    }
+  }
+
+  // Enemy panel (right side, vertical)
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(W - panelW, 0, panelW, panelH);
+  ctx.strokeStyle = '#334'; ctx.strokeRect(W - panelW, 0, panelW, panelH);
+
+  // Enemy ship mini portrait
+  ctx.fillStyle = '#111'; ctx.fillRect(W - 34, 2, 32, 32);
+  ctx.strokeStyle = enemyShip.def.color; ctx.strokeRect(W - 34, 2, 32, 32);
+  ctx.save(); ctx.translate(W - 18, 18); ctx.scale(0.8, 0.8);
+  enemyShip.def.draw({ flash: 0, thrusting: false, def: enemyShip.def, shieldTimer: 0 });
+  ctx.restore();
+
+  // Enemy ship name
+  ctx.fillStyle = enemyShip.def.color; ctx.font = '8px monospace';
+  ctx.save(); ctx.translate(W - 32, 44); ctx.fillText(enemyShip.def.name.substring(0, 5), 0, 0); ctx.restore();
+
+  // Enemy crew dots
+  const eCrew = Math.max(0, enemyShip.crew);
+  for (let i = 0; i < enemyShip.def.maxCrew; i++) {
+    const dx = W - 33 + (i % 4) * 8, dy = 50 + Math.floor(i / 4) * 6;
+    ctx.fillStyle = i < eCrew ? '#ff6644' : '#1a1a1a';
+    ctx.fillRect(dx, dy, 6, 4);
+    if (i < eCrew) { ctx.fillStyle = '#ff9977'; ctx.fillRect(dx, dy, 3, 2); }
+  }
+
+  // Enemy energy battery
+  const eEFrac = enemyShip.energy / enemyShip.def.maxEnergy;
+  ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+  ctx.fillText('BAT', W - 32, pBatY - 4);
+  for (let i = 0; i < pSegs; i++) {
+    const by = pBatY + (pSegs - 1 - i) * 5;
+    ctx.fillStyle = i / pSegs < eEFrac ? (enemyShip.def.color || '#ff4444') : '#111';
+    ctx.fillRect(W - 32, by, 28, 4);
+    if (i / pSegs < eEFrac) {
+      ctx.fillStyle = enemyShip.def.accent || '#ff6666'; ctx.fillRect(W - 32, by, 28, 2);
+    }
+  }
+  // End screen shake
+  if (shaking) ctx.restore();
+}
+
+// ==================== SCREEN: GAME OVER ====================
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, W, H);
+  drawStarField(0, 0, 30);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff4444'; ctx.font = 'bold 18px monospace';
+  ctx.fillText('GAME OVER', W/2, H/2 - 20);
+  ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+  ctx.fillText('The Vindicator is lost.', W/2, H/2);
+  ctx.fillText('The rift grows wider...', W/2, H/2 + 12);
+  ctx.fillText(`Precursor Artifacts: ${artifacts}/3`, W/2, H/2 + 24);
+  ctx.fillStyle = '#fff'; ctx.font = '8px monospace';
+  if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY TO RESTART', W/2, H/2 + 40);
+  ctx.textAlign = 'left';
+  for (const k in justPressed) {
+    if (justPressed[k]) { state = 'title'; break; }
+  }
+}
+
+// ==================== SCREEN: VICTORY ====================
+function drawVictory() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  drawStarField(frame, frame * 0.5, 100);
+
+  // Fireworks
+  if (Math.random() < 0.1) {
+    const fx = Math.random() * W, fy = Math.random() * H * 0.6;
+    const colors = ['#ff4444','#44ff44','#4444ff','#ffff44','#ff44ff','#44ffff'];
+    spawnParticles(fx + mapCamX, fy + mapCamY, colors[Math.floor(Math.random()*colors.length)], 12, 4);
+  }
+  for (const p of particles) p.update();
+  particles = particles.filter(p => p.life > 0);
+  for (const p of particles) p.draw(mapCamX || 0, mapCamY || 0);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 20px monospace';
+  ctx.fillText('VICTORY', W/2, H/2 - 50);
+  ctx.fillStyle = '#88bbff'; ctx.font = '8px monospace';
+  ctx.fillText('The dimensional rift is sealed!', W/2, H/2 - 32);
+  ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
+  ctx.fillText('With the three Precursor Artifacts,', W/2, H/2 - 16);
+  ctx.fillText('you closed the rift torn open by', W/2, H/2 - 4);
+  ctx.fillText('the Sa-Matra\'s destruction.', W/2, H/2 + 8);
+  ctx.fillStyle = '#88aacc';
+  ctx.fillText('The Orz are pushed back', W/2, H/2 + 24);
+  ctx.fillText('to the space *between* spaces.', W/2, H/2 + 34);
+  ctx.fillStyle = '#aaa';
+  ctx.fillText('The Alliance of Free Stars endures.', W/2, H/2 + 50);
+  ctx.fillStyle = '#667788';
+  ctx.fillText('But the Orz are still smiling...', W/2, H/2 + 64);
+  ctx.fillStyle = '#fff'; ctx.font = '8px monospace';
+  if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY', W/2, H/2 + 55);
+  ctx.textAlign = 'left';
+  for (const k in justPressed) {
+    if (justPressed[k]) { state = 'title'; break; }
+  }
+}
+
+// ==================== MAIN GAME LOOP ====================
+function gameLoop() {
+  try {
+  frame++;
+
+  if (state === 'title') {
+    music.play('title');
+    drawTitle();
+    for (const k in justPressed) {
+      if (justPressed[k]) { state = 'map'; initGame(); music.play('map'); break; }
+    }
+  } else if (state === 'map') {
+    music.play('map');
+    updateMap();
+    drawMap();
+  } else if (state === 'upgrade') {
+    updateUpgrade();
+    drawUpgrade();
+  } else if (state === 'starbase') {
+    music.play('map');
+    updateStarbase();
+    drawStarbase();
+  } else if (state === 'orbit') {
+    music.play('map');
+    updateOrbit();
+    drawOrbit();
+  } else if (state === 'dialogue') {
+    music.play('dialogue');
+    updateDialogue();
+    drawDialogue();
+  } else if (state === 'combat') {
+    updateCombat();
+    drawCombat();
+  } else if (state === 'gameover') {
+    drawGameOver();
+  } else if (state === 'victory') {
+    drawVictory();
+  }
+
+  for (const k in justPressed) delete justPressed[k];
+
+  // Render to display
+  displayCtx.drawImage(buffer, 0, 0, SNES_W, SNES_H, 0, 0, SNES_W * SCALE, SNES_H * SCALE);
+  // Scanlines
+  displayCtx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let sy = 0; sy < SNES_H * SCALE; sy += SCALE) displayCtx.fillRect(0, sy + SCALE - 1, SNES_W * SCALE, 1);
+
+  } catch(e) { console.error('Game error:', e); }
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>

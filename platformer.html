@@ -1,0 +1,2432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MEGA MAN X3</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+canvas { image-rendering: pixelated; border: 2px solid #333; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<canvas id="buffer" style="display:none"></canvas>
+<script>
+// ==================== SETUP ====================
+const SNES_W = 320, SNES_H = 224, SCALE = 3;
+const canvas = document.getElementById('game');
+canvas.width = SNES_W * SCALE; canvas.height = SNES_H * SCALE;
+const displayCtx = canvas.getContext('2d');
+displayCtx.imageSmoothingEnabled = false;
+const buffer = document.getElementById('buffer');
+buffer.width = SNES_W; buffer.height = SNES_H;
+const ctx = buffer.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const W = SNES_W, H = SNES_H;
+const TILE = 16;
+
+// ==================== SOUND ====================
+const sfx = (() => {
+  let audioCtx = null;
+  function getCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+  document.addEventListener('keydown', () => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }, { once: false });
+
+  function tone(freq, duration, type, vol, slide) {
+    const c = getCtx(), t = c.currentTime;
+    const osc = c.createOscillator(), gain = c.createGain();
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t);
+    if (slide) osc.frequency.linearRampToValueAtTime(slide, t + duration);
+    gain.gain.setValueAtTime(vol || 0.1, t);
+    gain.gain.linearRampToValueAtTime(0, t + duration);
+    osc.connect(gain); gain.connect(c.destination);
+    osc.start(t); osc.stop(t + duration);
+  }
+  function noise(duration, vol) {
+    const c = getCtx(), t = c.currentTime;
+    const buf = c.createBuffer(1, c.sampleRate * duration, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource(), gain = c.createGain();
+    src.buffer = buf;
+    gain.gain.setValueAtTime(vol || 0.08, t);
+    gain.gain.linearRampToValueAtTime(0, t + duration);
+    src.connect(gain); gain.connect(c.destination);
+    src.start(t);
+  }
+
+  return {
+    jump()       { tone(440, 0.08, 'square', 0.08, 880); },
+    walljump()   { tone(500, 0.06, 'square', 0.08, 1000); },
+    dash()       { noise(0.08, 0.08); tone(250, 0.06, 'square', 0.06, 120); },
+    shoot()      { tone(1200, 0.04, 'square', 0.1, 300); },
+    chargeShot() { tone(300, 0.12, 'sawtooth', 0.1, 800); noise(0.08, 0.05); },
+    hurt()       { tone(150, 0.12, 'square', 0.1, 60); noise(0.06, 0.06); },
+    enemyHit()   { tone(500, 0.04, 'square', 0.06, 250); },
+    enemyKill()  { tone(400, 0.06, 'square', 0.07, 100); noise(0.1, 0.08); },
+    coin()       { tone(1047, 0.04, 'square', 0.07); tone(1319, 0.08, 'square', 0.07); },
+    bossWarn()   { tone(120, 0.25, 'sawtooth', 0.08, 80); },
+    bossHit()    { tone(350, 0.05, 'square', 0.07, 180); },
+    bossDie()    { for(let i=0;i<5;i++) setTimeout(()=>{tone(250-i*30,0.12,'sawtooth',0.08,50);noise(0.08,0.06);},i*90); },
+    menuSelect() { tone(800, 0.04, 'square', 0.06, 1000); },
+    menuConfirm(){ tone(600, 0.05, 'square', 0.07); tone(900, 0.08, 'square', 0.07); },
+    ability()    { tone(523,0.08,'square',0.07); setTimeout(()=>tone(659,0.08,'square',0.07),80); setTimeout(()=>tone(784,0.12,'square',0.09),160); },
+    victory()    { [523,659,784,1047].forEach((f,i) => setTimeout(()=>tone(f,0.15,'square',0.08),i*120)); },
+    gameOver()   { tone(440,0.15,'square',0.08,220); setTimeout(()=>tone(220,0.3,'sawtooth',0.08,80),200); },
+  };
+})();
+
+// ==================== MUSIC ====================
+const music = (() => {
+  let audioCtx = null, loopTimer = null, currentTrack = null, masterGain = null;
+  let oscs = [];
+
+  function getCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!masterGain) {
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.05;
+      masterGain.connect(audioCtx.destination);
+    }
+    return audioCtx;
+  }
+
+  function stop() {
+    if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+    for (const o of oscs) try { o.stop(); } catch(e) {}
+    oscs = []; currentTrack = null;
+  }
+
+  // Note frequencies
+  const N = {
+    C3:131,D3:147,E3:165,F3:175,G3:196,A3:220,B3:247,
+    C4:262,D4:294,E4:330,F4:349,G4:392,A4:440,B4:494,
+    C5:523,D5:587,E5:659,F5:698,G5:784,A5:880,
+    Ds4:311,Gs4:415,Bb4:466,Ds5:622,Gs5:831,Bb5:932,Fs5:740,
+    R:0
+  };
+
+  // Stage music tracks
+  const TRACKS = {
+    title: { tempo:140, type:'square',
+      bass:[[N.C3,1],[N.G3,1],[N.F3,1],[N.G3,1],[N.A3,1],[N.E3,1],[N.G3,1],[N.D3,1]],
+      lead:[[N.E5,1],[N.G5,0.5],[N.E5,0.5],[N.C5,1],[N.D5,1],[N.E5,1],[N.D5,0.5],[N.C5,0.5],[N.A4,1],[N.R,1]]
+    },
+    stage0: { tempo:160, type:'sawtooth',
+      bass:[[N.E3,1],[N.E3,0.5],[N.R,0.5],[N.G3,1],[N.A3,1]],
+      lead:[[N.E5,0.5],[N.E5,0.5],[N.G5,1],[N.A5,0.5],[N.G5,0.5],[N.E5,1],[N.D5,1]]
+    },
+    stage1: { tempo:170, type:'square',
+      bass:[[N.A3,0.5],[N.A3,0.5],[N.C4,0.5],[N.A3,0.5],[N.G3,0.5],[N.G3,0.5],[N.A3,0.5],[N.G3,0.5]],
+      lead:[[N.A5,0.5],[N.C5,0.5],[N.E5,1],[N.A5,0.5],[N.G5,0.5],[N.E5,1],[N.D5,1]]
+    },
+    stage2: { tempo:130, type:'triangle',
+      bass:[[N.D3,1],[N.A3,1],[N.F3,1],[N.A3,1]],
+      lead:[[N.D5,1],[N.F5,0.5],[N.A5,0.5],[N.G5,1],[N.F5,0.5],[N.E5,0.5],[N.D5,1],[N.R,1]]
+    },
+    stage3: { tempo:155, type:'sawtooth',
+      bass:[[N.C3,1],[N.Ds4,0.5],[N.C3,0.5],[N.G3,1],[N.Gs4,1]],
+      lead:[[N.C5,0.5],[N.Ds5,0.5],[N.G5,1],[N.Gs5,0.5],[N.G5,0.5],[N.Ds5,1],[N.C5,1]]
+    },
+    stage4: { tempo:140, type:'triangle',
+      bass:[[N.A3,1],[N.E3,1],[N.F3,1],[N.E3,1]],
+      lead:[[N.A5,1],[N.E5,0.5],[N.A5,0.5],[N.B4,1],[N.G4,1],[N.E5,1],[N.R,1]]
+    },
+    stage5: { tempo:165, type:'sawtooth',
+      bass:[[N.G3,0.5],[N.G3,0.5],[N.Bb4,0.5],[N.G3,0.5],[N.F3,0.5],[N.F3,0.5],[N.G3,0.5],[N.F3,0.5]],
+      lead:[[N.G5,0.5],[N.Bb5,0.5],[N.G5,0.5],[N.D5,0.5],[N.Ds5,1],[N.D5,1],[N.R,1]]
+    },
+    stage6: { tempo:150, type:'square',
+      bass:[[N.D3,1],[N.A3,1],[N.G3,1],[N.C3,1]],
+      lead:[[N.D5,1],[N.Fs5,0.5],[N.A5,0.5],[N.G5,1],[N.Fs5,0.5],[N.E5,0.5],[N.D5,1],[N.R,1]]
+    },
+    stage7: { tempo:145, type:'square',
+      bass:[[N.E3,1],[N.B3,0.5],[N.E3,0.5],[N.G3,1],[N.A3,1]],
+      lead:[[N.B4,0.5],[N.E5,0.5],[N.G5,1],[N.E5,0.5],[N.D5,0.5],[N.E5,1],[N.R,1]]
+    },
+    sigma: { tempo:175, type:'sawtooth',
+      bass:[[N.C3,0.5],[N.C3,0.5],[N.Ds4,0.5],[N.C3,0.5],[N.G3,0.5],[N.Gs4,0.5],[N.G3,0.5],[N.C3,0.5]],
+      lead:[[N.C5,0.5],[N.Ds5,0.5],[N.G5,0.5],[N.Gs5,0.5],[N.G5,1],[N.Ds5,0.5],[N.C5,0.5],[N.R,1]]
+    },
+  };
+
+  function play(name) {
+    if (currentTrack === name) return;
+    stop(); currentTrack = name;
+    const tr = TRACKS[name]; if (!tr) return;
+    const c = getCtx(); if (c.state === 'suspended') return;
+    let bi = 0, li = 0;
+    let bt = c.currentTime + 0.1, lt = c.currentTime + 0.1;
+    const bl = 60 / tr.tempo;
+    function sched() {
+      const now = c.currentTime;
+      while (bt < now + 2) {
+        const [f,d] = tr.bass[bi % tr.bass.length];
+        if (f > 0) {
+          const o = c.createOscillator(), g = c.createGain();
+          o.type = 'square'; o.frequency.value = f;
+          g.gain.setValueAtTime(0.5, bt); g.gain.linearRampToValueAtTime(0, bt + d*bl*0.9);
+          o.connect(g); g.connect(masterGain); o.start(bt); o.stop(bt + d*bl); oscs.push(o);
+        }
+        bt += d * bl; bi++;
+      }
+      while (lt < now + 2) {
+        const [f,d] = tr.lead[li % tr.lead.length];
+        if (f > 0) {
+          const o = c.createOscillator(), g = c.createGain();
+          o.type = tr.type || 'triangle'; o.frequency.value = f;
+          g.gain.setValueAtTime(0.4, lt); g.gain.linearRampToValueAtTime(0, lt + d*bl*0.85);
+          o.connect(g); g.connect(masterGain); o.start(lt); o.stop(lt + d*bl); oscs.push(o);
+        }
+        lt += d * bl; li++;
+      }
+      if (oscs.length > 80) oscs.splice(0, 40);
+    }
+    sched();
+    loopTimer = setInterval(sched, 500);
+  }
+
+  return { play, stop };
+})();
+
+// ==================== CONSTANTS ====================
+const GRAVITY = 0.6;
+const JUMP_FORCE = -10;
+const MOVE_SPEED = 4;
+const DASH_SPEED = 10;
+const DASH_DURATION = 8;
+const WALL_SLIDE = 1.5;
+const BULLET_SPEED = 8;
+const CHARGE_TIME = 30;
+const MAX_HP = 16;
+const IFRAME_DUR = 40;
+const SCROLL_SPEED = 1.5;
+const BOSS_DIST = 120;
+
+// ==================== INPUT ====================
+const keys = {}, justPressed = {};
+document.addEventListener('keydown', e => {
+  if (!keys[e.code]) justPressed[e.code] = true;
+  keys[e.code] = true; e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; e.preventDefault(); });
+
+// ==================== GAME STATE ====================
+let state = 'title';
+let player, level, camera, particles;
+let bossActive, currentBoss;
+let stageSelectCursor = 0;
+let defeatedBosses = new Set();
+let currentStage = -1;
+let totalScore = 0;
+
+// Stage select grid: [0,1,2, 3,sigma,4, 5,6,7]
+const STAGE_GRID = [0, 1, 2, 3, -1, 4, 5, 6, 7];
+
+// ==================== PARTICLES ====================
+class Particle {
+  constructor(x, y, vx, vy, color, life) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.color = color; this.life = life; this.maxLife = life;
+  }
+  update() { this.x += this.vx; this.y += this.vy; this.vy += 0.2; this.life--; }
+  draw() {
+    ctx.globalAlpha = this.life / this.maxLife;
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x - camera, this.y, Math.max(1, Math.floor(2 * this.life/this.maxLife)), Math.max(1, Math.floor(2 * this.life/this.maxLife)));
+    ctx.globalAlpha = 1;
+  }
+}
+
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push(new Particle(x, y, (Math.random()-0.5)*6, (Math.random()-1)*5, color, 15+Math.random()*15));
+  }
+}
+
+// ==================== BULLETS ====================
+class Bullet {
+  constructor(x, y, dir, charged) {
+    this.x = x; this.y = y; this.dir = dir;
+    this.charged = charged;
+    this.damage = charged ? 3 : 1;
+    this.alive = true;
+    this.w = charged ? 12 : 6;
+    this.h = charged ? 8 : 4;
+  }
+  update() { this.x += BULLET_SPEED * this.dir; }
+  draw() {
+    const bx = this.x - camera, by = this.y;
+    if (this.charged) {
+      // Charged shot - large energy orb with trail
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = '#ff4400'; ctx.fillRect(bx - 3, by - 7, 18, 14);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ff6600'; ctx.fillRect(bx - 1, by - 5, 14, 10);
+      ctx.fillStyle = '#ff8800'; ctx.fillRect(bx + 1, by - 4, 10, 8);
+      ctx.fillStyle = '#ffcc00'; ctx.fillRect(bx + 3, by - 3, 6, 6);
+      ctx.fillStyle = '#fff'; ctx.fillRect(bx + 4, by - 1, 3, 2);
+      // Trail
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#ff6600'; ctx.fillRect(bx - 7, by - 3, 7, 6);
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = '#ff4400'; ctx.fillRect(bx - 12, by - 2, 6, 4);
+      ctx.globalAlpha = 1;
+    } else {
+      // Normal shot - X buster pellet
+      ctx.fillStyle = '#2060c0'; ctx.fillRect(bx - 1, by - 3, 9, 6);
+      ctx.fillStyle = '#4088e0'; ctx.fillRect(bx, by - 2, 7, 4);
+      ctx.fillStyle = '#60b0ff'; ctx.fillRect(bx + 1, by - 1, 5, 2);
+      ctx.fillStyle = '#b0e0ff'; ctx.fillRect(bx + 2, by - 1, 3, 1);
+      ctx.fillStyle = '#fff'; ctx.fillRect(bx + 3, by - 1, 1, 1);
+    }
+  }
+}
+
+class EnemyBullet {
+  constructor(x, y, dx, dy) {
+    this.x = x; this.y = y; this.dx = dx; this.dy = dy || 0; this.alive = true;
+  }
+  update() { this.x += this.dx; this.y += this.dy; }
+  draw() {
+    const bx = this.x - camera, by = this.y;
+    const pulse = Math.sin(Date.now() * 0.015) * 0.3 + 0.7;
+    ctx.globalAlpha = 0.4 * pulse;
+    ctx.fillStyle = '#ff2222'; ctx.fillRect(bx - 4, by - 4, 8, 8);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#880000'; ctx.fillRect(bx - 3, by - 3, 6, 6);
+    ctx.fillStyle = '#cc2222'; ctx.fillRect(bx - 2, by - 2, 4, 4);
+    ctx.fillStyle = '#ff5555'; ctx.fillRect(bx - 1, by - 1, 3, 3);
+    ctx.fillStyle = '#ffaaaa'; ctx.fillRect(bx, by, 1, 1);
+  }
+}
+
+// ==================== ENEMIES ====================
+class Enemy {
+  constructor(x, y, kind) {
+    this.x = x; this.y = y; this.kind = kind;
+    this.hp = kind === 'turret' ? 4 : 3;
+    this.alive = true; this.dir = -1;
+    this.range = 40 + Math.random() * 40;
+    this.originX = x;
+    this.shootTimer = 60 + Math.random() * 60;
+    this.frame = 0;
+    this.flash = 0;
+  }
+  update(playerX, ebullets) {
+    this.frame++;
+    if (this.flash > 0) this.flash--;
+    if (this.kind === 'walker') {
+      this.x += 1.5 * this.dir;
+      if (Math.abs(this.x - this.originX) > this.range) this.dir *= -1;
+    } else if (this.kind === 'turret') {
+      this.shootTimer--;
+      if (this.shootTimer <= 0) {
+        const dx = playerX < this.x ? -1 : 1;
+        ebullets.push(new EnemyBullet(this.x + dx * 10, this.y - 4, dx * 4, 0));
+        this.shootTimer = 80 + Math.random() * 60;
+      }
+    } else if (this.kind === 'flyer') {
+      this.x += this.dir;
+      this.y += Math.sin(this.frame * 0.05) * 1.5;
+      if (Math.abs(this.x - this.originX) > this.range) this.dir *= -1;
+      this.shootTimer--;
+      if (this.shootTimer <= 0) {
+        ebullets.push(new EnemyBullet(this.x, this.y, (playerX < this.x ? -1 : 1) * 3, 1.5));
+        this.shootTimer = 90 + Math.random() * 60;
+      }
+    }
+  }
+  hit(dmg) {
+    this.hp -= dmg; this.flash = 6;
+    if (this.hp <= 0) { this.alive = false; return true; }
+    return false;
+  }
+  draw() {
+    const sx = this.x - camera, ey = this.y;
+    const f = this.flash > 0;
+    if (this.kind === 'walker') {
+      // Notor Banger - armored patrol robot
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 6, ey - 1, 12, 2);
+      // Legs (animated walk)
+      const legOff = Math.sin(this.frame * 0.15) * 2;
+      ctx.fillStyle = f ? '#fff' : '#333344';
+      ctx.fillRect(sx - 4 + legOff, ey - 4, 3, 4);
+      ctx.fillRect(sx + 1 - legOff, ey - 4, 3, 4);
+      ctx.fillStyle = f ? '#fff' : '#444455';
+      ctx.fillRect(sx - 3 + legOff, ey - 3, 2, 2);
+      ctx.fillRect(sx + 1 - legOff, ey - 3, 2, 2);
+      // Feet
+      ctx.fillStyle = f ? '#fff' : '#555566';
+      ctx.fillRect(sx - 5 + legOff, ey - 1, 4, 1);
+      ctx.fillRect(sx + 1 - legOff, ey - 1, 4, 1);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#444455'; ctx.fillRect(sx - 6, ey - 11, 12, 7);
+      ctx.fillStyle = f ? '#fff' : '#555566'; ctx.fillRect(sx - 5, ey - 10, 10, 5);
+      ctx.fillStyle = f ? '#fff' : '#666677'; ctx.fillRect(sx - 4, ey - 9, 8, 3);
+      // Armor plate highlight
+      ctx.fillStyle = f ? '#fff' : '#777788'; ctx.fillRect(sx - 3, ey - 8, 6, 1);
+      // Panel line
+      ctx.fillStyle = f ? '#fff' : '#333344'; ctx.fillRect(sx - 5, ey - 7, 10, 1);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#555566'; ctx.fillRect(sx - 5, ey - 15, 10, 5);
+      ctx.fillStyle = f ? '#fff' : '#666677'; ctx.fillRect(sx - 4, ey - 14, 8, 3);
+      // Visor
+      ctx.fillStyle = f ? '#fff' : '#222233'; ctx.fillRect(sx - 3, ey - 13, 6, 2);
+      // Eye
+      if (!f) {
+        ctx.fillStyle = '#ff2222';
+        ctx.fillRect(sx + (this.dir > 0 ? 0 : -2), ey - 13, 2, 1);
+        ctx.fillStyle = '#ff6666';
+        ctx.fillRect(sx + (this.dir > 0 ? 1 : -1), ey - 12, 1, 1);
+      }
+      // Antenna
+      ctx.fillStyle = f ? '#fff' : '#888899'; ctx.fillRect(sx, ey - 17, 1, 2);
+      if (!f && this.frame % 20 < 10) {
+        ctx.fillStyle = '#ff4444'; ctx.fillRect(sx, ey - 17, 1, 1);
+      }
+      // Shoulder rivets
+      if (!f) {
+        ctx.fillStyle = '#888899';
+        ctx.fillRect(sx - 5, ey - 10, 1, 1);
+        ctx.fillRect(sx + 4, ey - 10, 1, 1);
+      }
+    } else if (this.kind === 'turret') {
+      // Head Gunner - mounted gun emplacement
+      // Base bolts
+      ctx.fillStyle = f ? '#fff' : '#2a3344'; ctx.fillRect(sx - 8, ey - 2, 16, 2);
+      ctx.fillStyle = f ? '#fff' : '#334455'; ctx.fillRect(sx - 7, ey - 1, 14, 1);
+      // Base
+      ctx.fillStyle = f ? '#fff' : '#3a4a5a'; ctx.fillRect(sx - 6, ey - 5, 12, 3);
+      ctx.fillStyle = f ? '#fff' : '#445566'; ctx.fillRect(sx - 5, ey - 4, 10, 2);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#4a5a6a'; ctx.fillRect(sx - 5, ey - 10, 10, 5);
+      ctx.fillStyle = f ? '#fff' : '#556677'; ctx.fillRect(sx - 4, ey - 9, 8, 3);
+      // Armor band
+      ctx.fillStyle = f ? '#fff' : '#3a4a5a'; ctx.fillRect(sx - 5, ey - 7, 10, 1);
+      // Top dome
+      ctx.fillStyle = f ? '#fff' : '#556677'; ctx.fillRect(sx - 4, ey - 13, 8, 3);
+      ctx.fillStyle = f ? '#fff' : '#667788'; ctx.fillRect(sx - 3, ey - 12, 6, 2);
+      ctx.fillStyle = f ? '#fff' : '#778899'; ctx.fillRect(sx - 2, ey - 12, 4, 1);
+      // Gun barrel
+      const barrelLen = this.shootTimer < 15 ? 8 : 6;
+      const bd = this.dir > 0 ? 1 : -1;
+      ctx.fillStyle = f ? '#fff' : '#334455';
+      ctx.fillRect(sx + bd * 4, ey - 9, bd * barrelLen, 4);
+      ctx.fillStyle = f ? '#fff' : '#445566';
+      ctx.fillRect(sx + bd * 4, ey - 8, bd * barrelLen, 2);
+      // Barrel highlight
+      ctx.fillStyle = f ? '#fff' : '#556677';
+      ctx.fillRect(sx + bd * 4, ey - 8, bd * (barrelLen - 1), 1);
+      // Muzzle
+      ctx.fillStyle = f ? '#fff' : '#2a3344';
+      ctx.fillRect(sx + bd * (barrelLen + 3), ey - 10, bd * 2, 5);
+      // Muzzle flash when firing
+      if (this.shootTimer > 75 && !f) {
+        ctx.fillStyle = '#ffcc44'; ctx.fillRect(sx + bd * (barrelLen + 5), ey - 10, 3, 5);
+        ctx.fillStyle = '#fff'; ctx.fillRect(sx + bd * (barrelLen + 6), ey - 9, 1, 3);
+      }
+      // Warning light
+      ctx.fillStyle = this.shootTimer < 20 ? '#ff4444' : (this.frame % 30 < 15 ? '#44ff44' : '#224422');
+      ctx.fillRect(sx - 1, ey - 14, 2, 2);
+      // Sensor dots
+      if (!f) {
+        ctx.fillStyle = '#88aacc'; ctx.fillRect(sx - 3, ey - 9, 1, 1);
+        ctx.fillStyle = '#88aacc'; ctx.fillRect(sx + 2, ey - 9, 1, 1);
+      }
+    } else {
+      // Carry Arm - flying drone
+      const wingBob = Math.sin(this.frame * 0.15) * 3;
+      const propSpin = this.frame * 0.3;
+      // Shadow
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#000'; ctx.fillRect(sx - 4, ey + 8, 8, 2);
+      ctx.globalAlpha = 1;
+      // Wings
+      ctx.fillStyle = f ? '#fff' : '#667799'; ctx.fillRect(sx - 11, ey - 9 + wingBob, 8, 3);
+      ctx.fillRect(sx + 3, ey - 9 - wingBob, 8, 3);
+      ctx.fillStyle = f ? '#fff' : '#7788aa'; ctx.fillRect(sx - 10, ey - 8 + wingBob, 6, 1);
+      ctx.fillRect(sx + 4, ey - 8 - wingBob, 6, 1);
+      // Wing tips
+      ctx.fillStyle = f ? '#fff' : '#445577'; ctx.fillRect(sx - 12, ey - 8 + wingBob, 2, 2);
+      ctx.fillRect(sx + 10, ey - 8 - wingBob, 2, 2);
+      // Wing joints
+      if (!f) {
+        ctx.fillStyle = '#556688'; ctx.fillRect(sx - 4, ey - 8, 1, 1);
+        ctx.fillRect(sx + 3, ey - 8, 1, 1);
+      }
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#445577'; ctx.fillRect(sx - 5, ey - 9, 10, 7);
+      ctx.fillStyle = f ? '#fff' : '#556688'; ctx.fillRect(sx - 4, ey - 8, 8, 5);
+      ctx.fillStyle = f ? '#fff' : '#667799'; ctx.fillRect(sx - 3, ey - 7, 6, 3);
+      // Panel line
+      ctx.fillStyle = f ? '#fff' : '#3a4a66'; ctx.fillRect(sx - 4, ey - 5, 8, 1);
+      // Head/sensor dome
+      ctx.fillStyle = f ? '#fff' : '#556688'; ctx.fillRect(sx - 3, ey - 11, 6, 3);
+      ctx.fillStyle = f ? '#fff' : '#667799'; ctx.fillRect(sx - 2, ey - 10, 4, 1);
+      // Eye
+      if (!f) {
+        ctx.fillStyle = '#2288ff'; ctx.fillRect(sx - 2, ey - 10, 4, 2);
+        ctx.fillStyle = '#44aaff'; ctx.fillRect(sx - 1, ey - 10, 2, 1);
+        ctx.fillStyle = '#88ddff'; ctx.fillRect(sx, ey - 10, 1, 1);
+      }
+      // Propeller
+      ctx.fillStyle = f ? '#fff' : '#aabbcc';
+      const pw = Math.abs(Math.cos(propSpin)) * 7;
+      ctx.fillRect(sx - pw, ey - 12, pw * 2, 1);
+      if (!f) { ctx.fillStyle = '#ccddeee'; ctx.fillRect(sx - pw + 1, ey - 12, Math.max(1, pw - 1), 1); }
+      // Grabber arms
+      ctx.fillStyle = f ? '#fff' : '#445566'; ctx.fillRect(sx - 3, ey - 2, 2, 5);
+      ctx.fillRect(sx + 1, ey - 2, 2, 5);
+      // Claws
+      ctx.fillStyle = f ? '#fff' : '#334455'; ctx.fillRect(sx - 4, ey + 2, 2, 2);
+      ctx.fillRect(sx + 2, ey + 2, 2, 2);
+      ctx.fillStyle = f ? '#fff' : '#556677'; ctx.fillRect(sx - 3, ey + 3, 1, 1);
+      ctx.fillRect(sx + 2, ey + 3, 1, 1);
+      // Thruster glow
+      if (!f && this.frame % 4 < 2) {
+        ctx.fillStyle = '#4488ff'; ctx.fillRect(sx - 2, ey - 2, 1, 1);
+        ctx.fillRect(sx + 1, ey - 2, 1, 1);
+      }
+    }
+  }
+}
+
+// ==================== X SPRITE (X3 style, animated) ====================
+const X_PAL = {
+  '1':'#0c1868',  // darkest blue (outline)
+  '2':'#2050a8',  // dark blue (armor shadow)
+  '3':'#4080d0',  // medium blue (main armor)
+  '4':'#78b8f0',  // light blue (highlight)
+  '5':'#a0d8f8',  // lightest blue (shine)
+  '6':'#f0c890',  // skin
+  '7':'#d02828',  // red (helmet gem)
+  '8':'#f8f8f8',  // white
+  '9':'#28a048',  // green (eyes)
+  'a':'#3068b8',  // buster cannon
+  'b':'#081040',  // absolute darkest
+  'c':'#f04040',  // gem highlight
+};
+
+// Each pose is an array of 16-char-wide rows
+const X_FRAMES = {
+  stand: [
+    '......b11b......',
+    '.....b12321b....',
+    '....b1234321b...',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b....',
+    '.....b1221b.....',
+    '..b3312332113a..',
+    '..b331244213aaa.',
+    '...31124421aaaa.',
+    '...b1123321baa..',
+    '....b12221b.....',
+    '....b122221b....',
+    '....b13..31b....',
+    '...b132..231b...',
+    '...b123..321b...',
+    '...b132..231b...',
+    '..b1123..3211b..',
+    '..b1132..2311b..',
+    '.b11132..23111b.',
+  ],
+  walk1: [
+    '......b11b......',
+    '.....b12321b....',
+    '....b1234321b...',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b....',
+    '.....b1221b.....',
+    '..b3312332113a..',
+    '..b331244213aaa.',
+    '...31124421aaaa.',
+    '...b1123321baa..',
+    '....b12221b.....',
+    '....b122221b....',
+    '....b13..31b....',
+    '...b132.231b....',
+    '...b1232.321b...',
+    '..b1132..231b...',
+    '..b113..2311b...',
+    '.b1113..3111b...',
+    '.b1111..1111b...',
+  ],
+  walk2: [
+    '......b11b......',
+    '.....b12321b....',
+    '....b1234321b...',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b....',
+    '.....b1221b.....',
+    '..b3312332113a..',
+    '..b331244213aaa.',
+    '...31124421aaaa.',
+    '...b1123321baa..',
+    '....b12221b.....',
+    '....b122221b....',
+    '....b13..31b....',
+    '...b1232.321b...',
+    '...b132.231b....',
+    '..b1132..2311b..',
+    '..b113..231b....',
+    '.b1113..3111b...',
+    '.b1111..1111b...',
+  ],
+  jump: [
+    '......b11b......',
+    '.....b12321b....',
+    '....b1234321b...',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b....',
+    '.....b1221b.....',
+    '..b3312332113a..',
+    '..b331244213aaa.',
+    '...31124421aaaa.',
+    '...b1123321baa..',
+    '....b12221b.....',
+    '....b12221b.....',
+    '...b132..231b...',
+    '..b123....321b..',
+    '..b132....231b..',
+    '..b113....311b..',
+    '.b1132....2311b.',
+    '.b1111....1111b.',
+    '.b1131....1311b.',
+  ],
+  dash: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '......b11b......',
+    '.....b12321b....',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b..a.',
+    '..b331233211aaa.',
+    '..b331244213aaa.',
+    '...b1124421baa..',
+    '...b11233211b...',
+    '..b113222231b...',
+    '.b11132223111b..',
+    '.b11111111111b..',
+  ],
+  shoot: [
+    '......b11b......',
+    '.....b12321b....',
+    '....b1234321b...',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b....',
+    '.....b1221b.....',
+    '..b33123321aaaa.',
+    '..b33124421aaaa.',
+    '...311244218aaa.',
+    '...b1123321aaaa.',
+    '....b12221b.....',
+    '....b122221b....',
+    '....b13..31b....',
+    '...b132..231b...',
+    '...b123..321b...',
+    '...b132..231b...',
+    '..b1123..3211b..',
+    '..b1132..2311b..',
+    '.b11132..23111b.',
+  ],
+  wallslide: [
+    '......b11b......',
+    '.....b12321b....',
+    '....b1234321b...',
+    '....b12cc321b...',
+    '...b123773321...',
+    '..b12334433211..',
+    '..b12345543211..',
+    '..b1269696211b..',
+    '...b16666621b...',
+    '....b166861b....',
+    '.....b1221b.....',
+    '..b3312332113a..',
+    '..b331244213aa..',
+    '...31124421aa...',
+    '...b1123321b....',
+    '....b12221b.....',
+    '...b122221b.....',
+    '...b132231b.....',
+    '..b1232321b.....',
+    '..b1132311b.....',
+    '..b1123211b.....',
+    '.b11132311b.....',
+    '.b11123211b.....',
+    '.b11113111b.....',
+  ],
+};
+
+function drawSprite(cx, footY, facing, flash, frameName) {
+  const rows = X_FRAMES[frameName || 'stand'];
+  const pal = X_PAL;
+  const sh = rows.length, sw = rows[0].length;
+  const halfW = Math.floor(sw / 2);
+  const topY = footY - sh;
+  for (let r = 0; r < sh; r++) {
+    for (let c = 0; c < sw; c++) {
+      const ch = rows[r][c];
+      if (ch === '.') continue;
+      ctx.fillStyle = flash ? '#fff' : (pal[ch] || '#ff00ff');
+      const px = facing > 0 ? (cx - halfW + c) : (cx + halfW - 1 - c);
+      ctx.fillRect(px, topY + r, 1, 1);
+    }
+  }
+}
+
+// ==================== PLAYER ====================
+class Player {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.vx = 0; this.vy = 0;
+    this.onGround = false; this.onWall = 0;
+    this.facing = 1;
+    this.hp = MAX_HP; this.alive = true;
+    this.score = 0; this.kills = 0; this.distance = 0;
+    this.dashing = 0; this.dashCooldown = 0;
+    this.charging = 0;
+    this.iframes = 0;
+    this.bullets = [];
+    this.w = 12; this.h = 20;
+    this.frame = 0;
+    this.shootTimer = 0;
+  }
+  jump() {
+    if (this.onGround) {
+      this.vy = JUMP_FORCE; this.onGround = false;
+      sfx.jump();
+    } else if (this.onWall !== 0) {
+      this.vy = JUMP_FORCE * 0.9;
+      this.vx = 6 * (-this.onWall);
+      this.facing = -this.onWall;
+      this.onWall = 0;
+      sfx.walljump();
+    }
+  }
+  dash() {
+    if (this.dashCooldown <= 0 && this.dashing <= 0 && this.onGround) {
+      this.dashing = DASH_DURATION;
+      this.dashCooldown = 25;
+      spawnParticles(this.x, this.y - 10, '#00aaff', 5);
+      sfx.dash();
+    }
+  }
+  shoot() {
+    const charged = this.charging >= CHARGE_TIME;
+    this.bullets.push(new Bullet(this.x + 10 * this.facing, this.y - this.h/2, this.facing, charged));
+    if (charged) { spawnParticles(this.x + 10*this.facing, this.y - this.h/2, '#ff8800', 6); sfx.chargeShot(); }
+    else sfx.shoot();
+    this.charging = 0;
+    this.shootTimer = 12;
+  }
+  takeDamage(amt) {
+    if (this.iframes > 0 || this.dashing > 0) return;
+    this.hp -= amt;
+    this.iframes = IFRAME_DUR;
+    spawnParticles(this.x, this.y - 10, '#ff4444', 8);
+    sfx.hurt();
+    if (this.hp <= 0) { this.hp = 0; this.alive = false; }
+  }
+  update(lvl, scrolling) {
+    this.frame++;
+    if (this.iframes > 0) this.iframes--;
+    if (this.dashCooldown > 0) this.dashCooldown--;
+    if (this.shootTimer > 0) this.shootTimer--;
+
+    // Movement
+    if (this.dashing > 0) {
+      this.dashing--;
+      this.x += DASH_SPEED * this.facing;
+    } else {
+      if (keys['ArrowLeft'] || keys['KeyA']) { this.x -= MOVE_SPEED; this.facing = -1; }
+      if (keys['ArrowRight'] || keys['KeyD']) { this.x += MOVE_SPEED; this.facing = 1; }
+      if (Math.abs(this.vx) > 0.5) { this.x += this.vx; this.vx *= 0.85; } else this.vx = 0;
+    }
+
+    if (scrolling) this.x += SCROLL_SPEED;
+    this.distance = this.x / 50;
+
+    // Gravity + wall slide
+    this.vy += GRAVITY;
+    this.onWall = 0;
+    if (!this.onGround && this.vy > 0) {
+      for (const w of lvl.walls) {
+        if (this.y > w.y && this.y - this.h < w.y + w.h) {
+          if (this.x > w.x - 8 && this.x < w.x + 4 && this.facing === 1) {
+            this.onWall = 1; if (this.vy > WALL_SLIDE) this.vy = WALL_SLIDE; this.x = w.x - 6;
+          }
+          if (this.x > w.x + w.w - 4 && this.x < w.x + w.w + 8 && this.facing === -1) {
+            this.onWall = -1; if (this.vy > WALL_SLIDE) this.vy = WALL_SLIDE; this.x = w.x + w.w + 6;
+          }
+        }
+      }
+    }
+
+    this.y += this.vy;
+    this.onGround = false;
+
+    // Ground collision
+    const gx = Math.floor(this.x / TILE);
+    if (!lvl.groundGaps.has(gx) && !lvl.groundGaps.has(gx-1) && this.y >= lvl.groundY) {
+      this.y = lvl.groundY; this.vy = 0; this.onGround = true;
+    }
+
+    // Platform collision
+    for (const p of lvl.platforms) {
+      if (this.x > p.x - 4 && this.x < p.x + p.w + 4 &&
+          this.vy >= 0 && this.y >= p.y && this.y - this.vy <= p.y + 4) {
+        this.y = p.y; this.vy = 0; this.onGround = true;
+      }
+    }
+
+    // Coins
+    for (let i = lvl.coins.length - 1; i >= 0; i--) {
+      const c = lvl.coins[i];
+      if (Math.abs(this.x - c.x) < 14 && Math.abs(this.y - this.h/2 - c.y) < 14) {
+        lvl.coins.splice(i, 1); this.score += 10; sfx.coin();
+        spawnParticles(c.x, c.y, '#ffd700', 6);
+      }
+    }
+
+    // Spikes
+    for (const s of lvl.spikes) {
+      if (Math.abs(this.x - s.x) < 10 && Math.abs(this.y - s.y) < 12) this.takeDamage(3);
+    }
+
+    // Pit death
+    if (this.y > H + 50) this.alive = false;
+
+    // Bullets
+    for (const b of this.bullets) b.update();
+    this.bullets = this.bullets.filter(b => b.alive && Math.abs(b.x - this.x) < W);
+  }
+  draw() {
+    if (this.iframes > 0 && Math.floor(this.iframes / 3) % 2 === 0) return;
+    const sx = this.x - camera, sy = this.y;
+
+    // Pick animation frame based on state
+    let anim = 'stand';
+    if (this.dashing > 0) {
+      anim = 'dash';
+    } else if (this.onWall !== 0) {
+      anim = 'wallslide';
+    } else if (!this.onGround) {
+      anim = 'jump';
+    } else if (keys['ArrowLeft'] || keys['KeyA'] || keys['ArrowRight'] || keys['KeyD']) {
+      // Walk cycle: alternate between walk1 and walk2 every 8 frames
+      anim = Math.floor(this.frame / 8) % 2 === 0 ? 'walk1' : 'walk2';
+    }
+    // Override to shoot pose if recently fired (shooting arm extended)
+    if (this.shootTimer > 0) anim = 'shoot';
+
+    const flipFacing = (this.onWall !== 0) ? -this.onWall : this.facing;
+    drawSprite(sx, sy, flipFacing, false, anim);
+
+    // Dash afterimage
+    if (this.dashing > 0 && this.frame % 2 === 0) {
+      ctx.globalAlpha = 0.3;
+      drawSprite(sx - this.facing * 6, sy, flipFacing, false, 'dash');
+      ctx.globalAlpha = 1;
+    }
+
+    // Charge glow
+    if (this.charging > 0) {
+      const t = Math.min(this.charging / CHARGE_TIME, 1);
+      ctx.strokeStyle = t >= 1 ? '#ff8800' : '#4488ff';
+      ctx.globalAlpha = 0.3 + t * 0.5;
+      ctx.lineWidth = 1 + t;
+      ctx.beginPath();
+      ctx.arc(sx, sy - 11, 8 + t * 5, 0, Math.PI * 2);
+      ctx.stroke();
+      // Charge sparkles
+      if (t >= 1 && this.frame % 4 === 0) {
+        const sa = Math.random() * Math.PI * 2;
+        const sr = 6 + Math.random() * 6;
+        ctx.fillStyle = '#ffcc44';
+        ctx.fillRect(sx + Math.cos(sa)*sr, sy - 11 + Math.sin(sa)*sr, 1, 1);
+      }
+      ctx.globalAlpha = 1; ctx.lineWidth = 1;
+    }
+  }
+}
+
+// ==================== BOSSES (MMX3 Mavericks) ====================
+const BOSSES = [
+  // 0: Tunnel Rhino - charges and jumps
+  { name: 'TUNNEL RHINO', color: '#886644', hp: 28, w: 40, h: 50,
+    ability: 'Tornado Fang',
+    update(b, p, eb) {
+      b.timer--;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        if (b.timer <= 0) { b.state = Math.random() < 0.5 ? 'charge' : 'jump'; b.timer = 40; }
+      } else if (b.state === 'charge') {
+        b.x += 6 * b.facing;
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 30; }
+      } else if (b.state === 'jump') {
+        if (b.timer === 40) b.vy = -14;
+        b.vy += 0.5; b.y += b.vy;
+        if (b.y >= b.groundY) {
+          b.y = b.groundY; b.vy = 0; b.state = 'idle'; b.timer = 35;
+          eb.push(new EnemyBullet(b.x - 20, b.groundY - 5, -3, 0));
+          eb.push(new EnemyBullet(b.x + 20, b.groundY - 5, 3, 0));
+          spawnParticles(b.x, b.groundY, '#886644', 12);
+        }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 22, sy - 2, 44, 3);
+      // Legs
+      ctx.fillStyle = f ? '#fff' : '#554422'; ctx.fillRect(sx - 18, sy - 12, 12, 12);
+      ctx.fillRect(sx + 6, sy - 12, 12, 12);
+      ctx.fillStyle = f ? '#fff' : '#665533'; ctx.fillRect(sx - 16, sy - 10, 8, 6);
+      ctx.fillRect(sx + 8, sy - 10, 8, 6);
+      // Feet
+      ctx.fillStyle = f ? '#fff' : '#776644'; ctx.fillRect(sx - 20, sy - 3, 14, 3);
+      ctx.fillRect(sx + 6, sy - 3, 14, 3);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#776633'; ctx.fillRect(sx - 20, sy - 48, 40, 36);
+      ctx.fillStyle = f ? '#fff' : '#886644'; ctx.fillRect(sx - 18, sy - 46, 36, 32);
+      ctx.fillStyle = f ? '#fff' : '#998855'; ctx.fillRect(sx - 14, sy - 44, 28, 28);
+      // Chest plate
+      ctx.fillStyle = f ? '#fff' : '#aa8866'; ctx.fillRect(sx - 10, sy - 40, 20, 14);
+      ctx.fillStyle = f ? '#fff' : '#bbaa77'; ctx.fillRect(sx - 8, sy - 38, 16, 10);
+      // Panel lines
+      ctx.fillStyle = f ? '#fff' : '#665533';
+      ctx.fillRect(sx - 18, sy - 34, 36, 1);
+      ctx.fillRect(sx - 18, sy - 22, 36, 1);
+      // Shoulder pads
+      ctx.fillStyle = f ? '#fff' : '#998855'; ctx.fillRect(sx - 24, sy - 46, 8, 14);
+      ctx.fillRect(sx + 16, sy - 46, 8, 14);
+      ctx.fillStyle = f ? '#fff' : '#aa9966'; ctx.fillRect(sx - 22, sy - 44, 4, 10);
+      ctx.fillRect(sx + 18, sy - 44, 4, 10);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#665533'; ctx.fillRect(sx - 14, sy - 62, 28, 16);
+      ctx.fillStyle = f ? '#fff' : '#776644'; ctx.fillRect(sx - 12, sy - 60, 24, 12);
+      ctx.fillStyle = f ? '#fff' : '#886644'; ctx.fillRect(sx - 10, sy - 58, 20, 8);
+      // Horn
+      ctx.fillStyle = f ? '#fff' : '#ccaa88'; ctx.fillRect(sx + b.facing * 8, sy - 72, 8, 14);
+      ctx.fillStyle = f ? '#fff' : '#ddbb99'; ctx.fillRect(sx + b.facing * 10, sy - 76, 4, 8);
+      ctx.fillStyle = f ? '#fff' : '#eeccaa'; ctx.fillRect(sx + b.facing * 11, sy - 78, 2, 4);
+      // Eyes
+      ctx.fillStyle = '#ffcc00'; ctx.fillRect(sx + (b.facing > 0 ? 2 : -10), sy - 57, 8, 4);
+      ctx.fillStyle = '#ffee44'; ctx.fillRect(sx + (b.facing > 0 ? 4 : -8), sy - 56, 4, 2);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx + (b.facing > 0 ? 5 : -6), sy - 56, 2, 1);
+      // Jaw
+      ctx.fillStyle = f ? '#fff' : '#554422'; ctx.fillRect(sx - 10, sy - 50, 20, 4);
+    }
+  },
+  // 1: Blast Hornet - flies and dives
+  { name: 'BLAST HORNET', color: '#ccaa00', hp: 30, w: 36, h: 36,
+    ability: 'Parasitic Bomb',
+    update(b, p, eb) {
+      b.timer--;
+      b.y = b.floatY + Math.sin(b.frame * 0.04) * 40;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        b.x += 2 * b.facing;
+        if (b.x < b.arenaL + 50) b.facing = 1;
+        if (b.x > b.arenaR - 50) b.facing = -1;
+        if (b.timer <= 0) { b.state = 'dive'; b.timer = 50; b.tx = p.x; b.ty = p.y; }
+      } else if (b.state === 'dive') {
+        const dx = b.tx - b.x, dy = b.ty - b.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 10) { b.x += (dx/dist) * 8; b.y += (dy/dist) * 8; }
+        if (b.timer <= 0) {
+          b.state = 'idle'; b.timer = 50;
+          for (let a = 0; a < Math.PI * 2; a += Math.PI / 3)
+            eb.push(new EnemyBullet(b.x, b.y, Math.cos(a) * 3, Math.sin(a) * 3));
+          spawnParticles(b.x, b.y, '#ccaa00', 10);
+        }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      const wing = Math.sin(b.frame * 0.15) * 6;
+      // Wings - detailed with segments
+      ctx.fillStyle = f ? '#fff' : '#ccbb44'; ctx.fillRect(sx - 28, sy - 14 + wing, 20, 3);
+      ctx.fillRect(sx + 8, sy - 14 - wing, 20, 3);
+      ctx.fillStyle = f ? '#fff' : '#eedd66'; ctx.fillRect(sx - 26, sy - 13 + wing, 16, 5);
+      ctx.fillRect(sx + 10, sy - 13 - wing, 16, 5);
+      ctx.fillStyle = f ? '#fff' : '#ffee88'; ctx.fillRect(sx - 22, sy - 12 + wing, 10, 3);
+      ctx.fillRect(sx + 12, sy - 12 - wing, 10, 3);
+      // Wing veins
+      ctx.fillStyle = f ? '#fff' : '#aa9933';
+      ctx.fillRect(sx - 20, sy - 12 + wing, 1, 3);
+      ctx.fillRect(sx - 14, sy - 11 + wing, 1, 2);
+      ctx.fillRect(sx + 20, sy - 12 - wing, 1, 3);
+      ctx.fillRect(sx + 14, sy - 11 - wing, 1, 2);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#aa8800'; ctx.fillRect(sx - 12, sy - 18, 24, 24);
+      ctx.fillStyle = f ? '#fff' : '#ccaa00'; ctx.fillRect(sx - 10, sy - 16, 20, 20);
+      ctx.fillStyle = f ? '#fff' : '#ddbb22'; ctx.fillRect(sx - 8, sy - 14, 16, 16);
+      // Body stripes
+      ctx.fillStyle = f ? '#fff' : '#886600';
+      ctx.fillRect(sx - 8, sy - 8, 16, 2);
+      ctx.fillRect(sx - 6, sy - 2, 12, 2);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#886600'; ctx.fillRect(sx - 8, sy - 26, 16, 10);
+      ctx.fillStyle = f ? '#fff' : '#aa8800'; ctx.fillRect(sx - 6, sy - 24, 12, 6);
+      // Antennae
+      ctx.fillStyle = f ? '#fff' : '#ccaa00';
+      ctx.fillRect(sx - 4, sy - 30, 2, 5);
+      ctx.fillRect(sx + 2, sy - 30, 2, 5);
+      ctx.fillStyle = f ? '#fff' : '#eedd44';
+      ctx.fillRect(sx - 4, sy - 32, 2, 2);
+      ctx.fillRect(sx + 2, sy - 32, 2, 2);
+      // Eyes
+      ctx.fillStyle = '#ff2222'; ctx.fillRect(sx + (b.facing > 0 ? 0 : -6), sy - 23, 6, 4);
+      ctx.fillStyle = '#ff6644'; ctx.fillRect(sx + (b.facing > 0 ? 1 : -5), sy - 22, 4, 2);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx + (b.facing > 0 ? 2 : -3), sy - 22, 1, 1);
+      // Stinger
+      ctx.fillStyle = f ? '#fff' : '#776600'; ctx.fillRect(sx - 3, sy + 6, 6, 4);
+      ctx.fillStyle = f ? '#fff' : '#887700'; ctx.fillRect(sx - 2, sy + 10, 4, 4);
+      ctx.fillStyle = f ? '#fff' : '#998800'; ctx.fillRect(sx - 1, sy + 14, 2, 3);
+      // Legs
+      ctx.fillStyle = f ? '#fff' : '#886600';
+      ctx.fillRect(sx - 6, sy + 2, 3, 6);
+      ctx.fillRect(sx + 3, sy + 2, 3, 6);
+    }
+  },
+  // 2: Toxic Seahorse - slithers and shoots
+  { name: 'TOXIC SEAHORSE', color: '#6644aa', hp: 30, w: 30, h: 50,
+    ability: 'Acid Burst',
+    update(b, p, eb) {
+      b.timer--;
+      b.x += Math.sin(b.frame * 0.03) * 2;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        if (b.timer <= 0) { b.state = Math.random() < 0.5 ? 'shoot' : 'lunge'; b.timer = 30; }
+      } else if (b.state === 'shoot') {
+        if (b.timer % 8 === 0) {
+          eb.push(new EnemyBullet(b.x + b.facing * 20, b.y - 25, b.facing * 4, 0));
+          eb.push(new EnemyBullet(b.x + b.facing * 20, b.y - 25, b.facing * 3, -2));
+          spawnParticles(b.x + b.facing * 20, b.y - 25, '#8866cc', 3);
+        }
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 40; }
+      } else if (b.state === 'lunge') {
+        b.x += 8 * b.facing;
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 40; b.facing *= -1; }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      const sway = Math.sin(b.frame * 0.08) * 4;
+      // Tail segments
+      for (let i = 3; i >= 0; i--) {
+        const tx = sx - b.facing * i * 7 + Math.sin(b.frame * 0.06 + i * 0.8) * 5;
+        const tw = 10 - i * 2;
+        ctx.fillStyle = f ? '#fff' : '#4422aa'; ctx.fillRect(tx - tw/2 - 1, sy - 10, tw + 2, 8);
+        ctx.fillStyle = f ? '#fff' : '#5533aa'; ctx.fillRect(tx - tw/2, sy - 9, tw, 6);
+        ctx.fillStyle = f ? '#fff' : '#6644bb'; ctx.fillRect(tx - tw/2 + 1, sy - 8, tw - 2, 4);
+      }
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#5533aa'; ctx.fillRect(sx - 14 + sway, sy - 50, 28, 42);
+      ctx.fillStyle = f ? '#fff' : '#6644aa'; ctx.fillRect(sx - 12 + sway, sy - 48, 24, 38);
+      ctx.fillStyle = f ? '#fff' : '#7755bb'; ctx.fillRect(sx - 10 + sway, sy - 46, 20, 34);
+      // Body pattern
+      ctx.fillStyle = f ? '#fff' : '#5533aa';
+      ctx.fillRect(sx - 8 + sway, sy - 40, 16, 2);
+      ctx.fillRect(sx - 6 + sway, sy - 30, 12, 2);
+      ctx.fillRect(sx - 4 + sway, sy - 20, 8, 2);
+      // Belly highlight
+      ctx.fillStyle = f ? '#fff' : '#8866cc'; ctx.fillRect(sx - 6 + sway, sy - 36, 12, 8);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#4422aa'; ctx.fillRect(sx - 16 + sway, sy - 60, 32, 14);
+      ctx.fillStyle = f ? '#fff' : '#5533aa'; ctx.fillRect(sx - 14 + sway, sy - 58, 28, 10);
+      ctx.fillStyle = f ? '#fff' : '#6644bb'; ctx.fillRect(sx - 12 + sway, sy - 56, 24, 6);
+      // Snout
+      ctx.fillStyle = f ? '#fff' : '#5533aa';
+      ctx.fillRect(sx + b.facing * 10 + sway, sy - 56, b.facing * 8, 8);
+      ctx.fillStyle = f ? '#fff' : '#6644bb';
+      ctx.fillRect(sx + b.facing * 12 + sway, sy - 54, b.facing * 4, 4);
+      // Eyes
+      ctx.fillStyle = '#22ffaa'; ctx.fillRect(sx - 10 + sway, sy - 56, 5, 5);
+      ctx.fillRect(sx + 5 + sway, sy - 56, 5, 5);
+      ctx.fillStyle = '#44ffcc'; ctx.fillRect(sx - 9 + sway, sy - 55, 3, 3);
+      ctx.fillRect(sx + 6 + sway, sy - 55, 3, 3);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx - 8 + sway, sy - 55, 1, 1);
+      ctx.fillRect(sx + 7 + sway, sy - 55, 1, 1);
+      // Fins
+      ctx.fillStyle = f ? '#fff' : '#7755cc';
+      ctx.fillRect(sx - 16 + sway, sy - 46, 4, 12);
+      ctx.fillRect(sx + 12 + sway, sy - 46, 4, 12);
+      ctx.fillStyle = f ? '#fff' : '#8866dd';
+      ctx.fillRect(sx - 15 + sway, sy - 44, 2, 8);
+      ctx.fillRect(sx + 13 + sway, sy - 44, 2, 8);
+    }
+  },
+  // 3: Volt Catfish - heavy electric attacks
+  { name: 'VOLT CATFISH', color: '#3388cc', hp: 35, w: 50, h: 60,
+    ability: 'Triad Thunder',
+    update(b, p, eb) {
+      b.timer--;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        if (b.timer <= 0) { b.state = Math.random() < 0.5 ? 'slam' : 'lightning'; b.timer = 40; }
+      } else if (b.state === 'slam') {
+        if (b.timer === 38) b.vy = -12;
+        b.vy += 0.6; b.y += b.vy;
+        if (b.y >= b.groundY) {
+          b.y = b.groundY; b.vy = 0; b.state = 'idle'; b.timer = 35;
+          for (let i = -3; i <= 3; i++)
+            eb.push(new EnemyBullet(b.x + i * 30, b.groundY - 10, i * 1.5, -5));
+          spawnParticles(b.x, b.groundY, '#3388cc', 15);
+        }
+      } else if (b.state === 'lightning') {
+        if (b.timer % 8 === 0) {
+          eb.push(new EnemyBullet(p.x + (Math.random()-0.5)*40, b.groundY - 280, 0, 8));
+          spawnParticles(p.x, b.groundY - 280, '#66eeff', 4);
+        }
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 35; }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 26, sy - 2, 52, 3);
+      // Legs
+      ctx.fillStyle = f ? '#fff' : '#1a5588'; ctx.fillRect(sx - 20, sy - 12, 14, 12);
+      ctx.fillRect(sx + 6, sy - 12, 14, 12);
+      ctx.fillStyle = f ? '#fff' : '#2266aa'; ctx.fillRect(sx - 18, sy - 10, 10, 6);
+      ctx.fillRect(sx + 8, sy - 10, 10, 6);
+      ctx.fillStyle = f ? '#fff' : '#3388cc'; ctx.fillRect(sx - 22, sy - 3, 16, 3);
+      ctx.fillRect(sx + 6, sy - 3, 16, 3);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#1a5588'; ctx.fillRect(sx - 24, sy - 58, 48, 46);
+      ctx.fillStyle = f ? '#fff' : '#2266aa'; ctx.fillRect(sx - 22, sy - 56, 44, 42);
+      ctx.fillStyle = f ? '#fff' : '#3388cc'; ctx.fillRect(sx - 18, sy - 52, 36, 34);
+      // Belly
+      ctx.fillStyle = f ? '#fff' : '#44aadd'; ctx.fillRect(sx - 12, sy - 44, 24, 20);
+      ctx.fillStyle = f ? '#fff' : '#55bbee'; ctx.fillRect(sx - 10, sy - 42, 20, 16);
+      // Panel lines
+      ctx.fillStyle = f ? '#fff' : '#1a5588';
+      ctx.fillRect(sx - 18, sy - 38, 36, 1);
+      ctx.fillRect(sx - 18, sy - 28, 36, 1);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#1a5588'; ctx.fillRect(sx - 16, sy - 76, 32, 20);
+      ctx.fillStyle = f ? '#fff' : '#2266aa'; ctx.fillRect(sx - 14, sy - 74, 28, 16);
+      ctx.fillStyle = f ? '#fff' : '#3388cc'; ctx.fillRect(sx - 12, sy - 72, 24, 12);
+      // Whiskers
+      ctx.fillStyle = f ? '#fff' : '#55aadd';
+      ctx.fillRect(sx - 30, sy - 70, 16, 2);
+      ctx.fillRect(sx + 14, sy - 70, 16, 2);
+      ctx.fillRect(sx - 28, sy - 66, 12, 2);
+      ctx.fillRect(sx + 16, sy - 66, 12, 2);
+      // Eyes
+      ctx.fillStyle = '#ffcc00'; ctx.fillRect(sx - 10, sy - 70, 8, 5);
+      ctx.fillRect(sx + 2, sy - 70, 8, 5);
+      ctx.fillStyle = '#ffee44'; ctx.fillRect(sx - 8, sy - 69, 4, 3);
+      ctx.fillRect(sx + 4, sy - 69, 4, 3);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx - 7, sy - 69, 2, 2);
+      ctx.fillRect(sx + 5, sy - 69, 2, 2);
+      // Electric sparks
+      if (b.frame % 8 < 4 && !f) {
+        ctx.fillStyle = '#44eeff';
+        for (let i = 0; i < 3; i++) {
+          const sparkX = sx - 26 + Math.random() * 52;
+          const sparkY = sy - 55 + Math.random() * 30;
+          ctx.fillRect(sparkX, sparkY, 2, 1);
+          ctx.fillRect(sparkX + 1, sparkY + 1, 1, 2);
+        }
+      }
+      // Shoulder coils
+      ctx.fillStyle = f ? '#fff' : '#55aadd';
+      ctx.fillRect(sx - 26, sy - 52, 4, 20);
+      ctx.fillRect(sx + 22, sy - 52, 4, 20);
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = f ? '#fff' : '#3388cc';
+        ctx.fillRect(sx - 26, sy - 50 + i * 6, 4, 2);
+        ctx.fillRect(sx + 22, sy - 50 + i * 6, 4, 2);
+      }
+    }
+  },
+  // 4: Blizzard Buffalo - charges and ice
+  { name: 'BLIZZARD BUFFALO', color: '#88bbee', hp: 32, w: 44, h: 50,
+    ability: 'Frost Shield',
+    update(b, p, eb) {
+      b.timer--;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        if (b.timer <= 0) { b.state = Math.random() < 0.5 ? 'charge' : 'ice'; b.timer = 35; }
+      } else if (b.state === 'charge') {
+        if (b.timer === 35) { b.vy = -8; b.vx = b.facing * 8; }
+        b.vy += 0.5; b.y += b.vy; b.x += b.vx; b.vx *= 0.99;
+        if (b.y >= b.groundY) {
+          b.y = b.groundY; b.vy = 0; b.vx = 0; b.state = 'idle'; b.timer = 35;
+          for (let i = -2; i <= 2; i++)
+            eb.push(new EnemyBullet(b.x + i * 20, b.groundY - 5, i * 2, -4));
+          spawnParticles(b.x, b.groundY, '#88bbee', 12);
+        }
+      } else if (b.state === 'ice') {
+        if (b.timer % 4 === 0) {
+          eb.push(new EnemyBullet(b.x + b.facing * 20, b.y - 22, b.facing * 5, (Math.random()-0.5)*2));
+          spawnParticles(b.x + b.facing * 20, b.y - 22, '#aaddff', 2);
+        }
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 40; }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 22, sy - 2, 44, 3);
+      // Legs
+      ctx.fillStyle = f ? '#fff' : '#5588aa'; ctx.fillRect(sx - 20, sy - 8, 14, 8);
+      ctx.fillRect(sx + 6, sy - 8, 14, 8);
+      ctx.fillStyle = f ? '#fff' : '#6699bb'; ctx.fillRect(sx - 18, sy - 6, 10, 4);
+      ctx.fillRect(sx + 8, sy - 6, 10, 4);
+      // Hooves
+      ctx.fillStyle = f ? '#fff' : '#77aacc'; ctx.fillRect(sx - 22, sy - 3, 16, 3);
+      ctx.fillRect(sx + 6, sy - 3, 16, 3);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#6699cc'; ctx.fillRect(sx - 22, sy - 46, 44, 38);
+      ctx.fillStyle = f ? '#fff' : '#88bbee'; ctx.fillRect(sx - 20, sy - 44, 40, 34);
+      ctx.fillStyle = f ? '#fff' : '#99ccff'; ctx.fillRect(sx - 16, sy - 40, 32, 26);
+      // Ice armor plates
+      ctx.fillStyle = f ? '#fff' : '#aaddff';
+      ctx.fillRect(sx - 14, sy - 38, 28, 4);
+      ctx.fillStyle = f ? '#fff' : '#bbeeFF'; ctx.fillRect(sx - 12, sy - 37, 24, 2);
+      // Panel lines
+      ctx.fillStyle = f ? '#fff' : '#5588aa';
+      ctx.fillRect(sx - 20, sy - 32, 40, 1);
+      ctx.fillRect(sx - 20, sy - 20, 40, 1);
+      // Shoulder armor
+      ctx.fillStyle = f ? '#fff' : '#77aacc'; ctx.fillRect(sx - 26, sy - 44, 8, 16);
+      ctx.fillRect(sx + 18, sy - 44, 8, 16);
+      ctx.fillStyle = f ? '#fff' : '#88bbee'; ctx.fillRect(sx - 24, sy - 42, 4, 12);
+      ctx.fillRect(sx + 20, sy - 42, 4, 12);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#5588aa'; ctx.fillRect(sx - 18, sy - 58, 36, 14);
+      ctx.fillStyle = f ? '#fff' : '#6699cc'; ctx.fillRect(sx - 16, sy - 56, 32, 10);
+      ctx.fillStyle = f ? '#fff' : '#88bbee'; ctx.fillRect(sx - 14, sy - 54, 28, 6);
+      // Horns
+      ctx.fillStyle = f ? '#fff' : '#99ccff'; ctx.fillRect(sx - 16, sy - 66, 8, 10);
+      ctx.fillRect(sx + 8, sy - 66, 8, 10);
+      ctx.fillStyle = f ? '#fff' : '#aaddff'; ctx.fillRect(sx - 14, sy - 70, 4, 8);
+      ctx.fillRect(sx + 10, sy - 70, 4, 8);
+      ctx.fillStyle = f ? '#fff' : '#bbeeFF'; ctx.fillRect(sx - 13, sy - 72, 2, 4);
+      ctx.fillRect(sx + 11, sy - 72, 2, 4);
+      // Snout
+      ctx.fillStyle = f ? '#fff' : '#6699cc';
+      ctx.fillRect(sx + b.facing * 10, sy - 54, b.facing * 8, 8);
+      // Eyes
+      ctx.fillStyle = '#ff2222'; ctx.fillRect(sx + (b.facing > 0 ? 2 : -8), sy - 53, 6, 4);
+      ctx.fillStyle = '#ff5544'; ctx.fillRect(sx + (b.facing > 0 ? 3 : -7), sy - 52, 4, 2);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx + (b.facing > 0 ? 4 : -5), sy - 52, 1, 1);
+      // Ice breath particles
+      if (b.state === 'ice' && !f) {
+        for (let i = 0; i < 3; i++) {
+          ctx.fillStyle = i % 2 ? '#aaddff' : '#fff';
+          ctx.fillRect(sx + b.facing * (20 + i * 8 + Math.random() * 4), sy - 50 + Math.random() * 6, 2, 2);
+        }
+      }
+    }
+  },
+  // 5: Neon Tiger - fast dashes
+  { name: 'NEON TIGER', color: '#ff8800', hp: 30, w: 36, h: 40,
+    ability: 'Ray Splasher',
+    update(b, p, eb) {
+      b.timer--;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        if (b.timer <= 0) { b.state = Math.random() < 0.5 ? 'dash' : 'shoot'; b.timer = 25; }
+      } else if (b.state === 'dash') {
+        b.x += 12 * b.facing;
+        if (b.frame % 3 === 0) spawnParticles(b.x, b.y - 15, '#ff6600', 2);
+        if (b.timer <= 0) {
+          b.state = 'idle'; b.timer = 30;
+          eb.push(new EnemyBullet(b.x, b.y - 20, -b.facing * 4, 0));
+          eb.push(new EnemyBullet(b.x, b.y - 20, -b.facing * 4, -2));
+        }
+      } else if (b.state === 'shoot') {
+        if (b.timer % 6 === 0) {
+          const angle = Math.atan2(p.y - b.y + 20, p.x - b.x);
+          eb.push(new EnemyBullet(b.x, b.y - 20, Math.cos(angle) * 4, Math.sin(angle) * 4));
+          spawnParticles(b.x, b.y - 20, '#ffaa44', 2);
+        }
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 35; }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 14, sy - 2, 28, 3);
+      // Tail
+      const tailSway = Math.sin(b.frame * 0.1) * 3;
+      ctx.fillStyle = f ? '#fff' : '#cc6600';
+      ctx.fillRect(sx - b.facing * 14, sy - 16 + tailSway, 6, 3);
+      ctx.fillRect(sx - b.facing * 18, sy - 14 + tailSway, 4, 2);
+      ctx.fillStyle = f ? '#fff' : '#ff8800';
+      ctx.fillRect(sx - b.facing * 20, sy - 13 + tailSway, 3, 2);
+      // Hind legs
+      ctx.fillStyle = f ? '#fff' : '#aa5500'; ctx.fillRect(sx - 14, sy - 8, 7, 8);
+      ctx.fillRect(sx + 7, sy - 8, 7, 8);
+      ctx.fillStyle = f ? '#fff' : '#cc6600'; ctx.fillRect(sx - 12, sy - 6, 5, 4);
+      ctx.fillRect(sx + 8, sy - 6, 5, 4);
+      // Paws
+      ctx.fillStyle = f ? '#fff' : '#ddaa44'; ctx.fillRect(sx - 15, sy - 2, 8, 2);
+      ctx.fillRect(sx + 7, sy - 2, 8, 2);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#cc6600'; ctx.fillRect(sx - 16, sy - 30, 32, 22);
+      ctx.fillStyle = f ? '#fff' : '#ff8800'; ctx.fillRect(sx - 14, sy - 28, 28, 18);
+      ctx.fillStyle = f ? '#fff' : '#ffaa33'; ctx.fillRect(sx - 10, sy - 26, 20, 14);
+      // Tiger stripes
+      ctx.fillStyle = f ? '#fff' : '#993300';
+      ctx.fillRect(sx - 12, sy - 26, 3, 8);
+      ctx.fillRect(sx - 4, sy - 28, 3, 10);
+      ctx.fillRect(sx + 4, sy - 27, 3, 9);
+      ctx.fillRect(sx + 10, sy - 26, 3, 8);
+      // Belly
+      ctx.fillStyle = f ? '#fff' : '#ffcc66'; ctx.fillRect(sx - 6, sy - 18, 12, 8);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#cc6600'; ctx.fillRect(sx - 10, sy - 38, 20, 10);
+      ctx.fillStyle = f ? '#fff' : '#ff8800'; ctx.fillRect(sx - 8, sy - 36, 16, 8);
+      // Snout
+      ctx.fillStyle = f ? '#fff' : '#ffaa33';
+      ctx.fillRect(sx + b.facing * 6, sy - 34, b.facing * 10, 6);
+      ctx.fillStyle = f ? '#fff' : '#ffcc66';
+      ctx.fillRect(sx + b.facing * 8, sy - 33, b.facing * 6, 4);
+      // Nose
+      ctx.fillStyle = f ? '#fff' : '#993300';
+      ctx.fillRect(sx + b.facing * 14, sy - 32, 2, 2);
+      // Ears
+      ctx.fillStyle = f ? '#fff' : '#cc6600'; ctx.fillRect(sx - 8, sy - 44, 6, 7);
+      ctx.fillRect(sx + 2, sy - 44, 6, 7);
+      ctx.fillStyle = f ? '#fff' : '#ff8800'; ctx.fillRect(sx - 6, sy - 42, 3, 4);
+      ctx.fillRect(sx + 3, sy - 42, 3, 4);
+      // Inner ear
+      ctx.fillStyle = f ? '#fff' : '#ffcc88'; ctx.fillRect(sx - 5, sy - 41, 1, 2);
+      ctx.fillRect(sx + 4, sy - 41, 1, 2);
+      // Eyes
+      ctx.fillStyle = '#ffcc00'; ctx.fillRect(sx + (b.facing > 0 ? 2 : -8), sy - 36, 6, 4);
+      ctx.fillStyle = '#ffee44'; ctx.fillRect(sx + (b.facing > 0 ? 3 : -7), sy - 35, 4, 2);
+      ctx.fillStyle = '#111'; ctx.fillRect(sx + (b.facing > 0 ? 5 : -5), sy - 35, 2, 2);
+      // Dash trail
+      if (b.state === 'dash' && !f) {
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#ff6600';
+        ctx.fillRect(sx - b.facing * 20, sy - 28, 16, 16);
+        ctx.globalAlpha = 0.15;
+        ctx.fillRect(sx - b.facing * 32, sy - 26, 12, 12);
+        ctx.globalAlpha = 1;
+      }
+    }
+  },
+  // 6: Gravity Beetle - heavy ground attacks
+  { name: 'GRAVITY BEETLE', color: '#445588', hp: 35, w: 48, h: 56,
+    ability: 'Gravity Well',
+    update(b, p, eb) {
+      b.timer--;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        b.x += 1.5 * b.facing;
+        if (b.timer <= 0) { b.state = Math.random() < 0.5 ? 'smash' : 'boulders'; b.timer = 40; }
+      } else if (b.state === 'smash') {
+        if (b.timer === 38) b.vy = -15;
+        b.vy += 0.7; b.y += b.vy;
+        if (b.y >= b.groundY) {
+          b.y = b.groundY; b.vy = 0; b.state = 'idle'; b.timer = 40;
+          for (let i = -4; i <= 4; i++) if (i !== 0)
+            eb.push(new EnemyBullet(b.x + i * 25, b.groundY - 8, i * 1.5, -3));
+          spawnParticles(b.x, b.groundY, '#445588', 20);
+        }
+      } else if (b.state === 'boulders') {
+        if (b.timer % 12 === 0) {
+          eb.push(new EnemyBullet(b.x, b.y - 50, b.facing * 3, -6));
+          eb.push(new EnemyBullet(b.x, b.y - 50, b.facing * 4, -4));
+        }
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 35; }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 26, sy - 2, 52, 3);
+      // Legs
+      ctx.fillStyle = f ? '#fff' : '#2a3366'; ctx.fillRect(sx - 20, sy - 10, 12, 10);
+      ctx.fillRect(sx + 8, sy - 10, 12, 10);
+      ctx.fillStyle = f ? '#fff' : '#334477'; ctx.fillRect(sx - 18, sy - 8, 8, 5);
+      ctx.fillRect(sx + 10, sy - 8, 8, 5);
+      ctx.fillStyle = f ? '#fff' : '#445588'; ctx.fillRect(sx - 22, sy - 3, 14, 3);
+      ctx.fillRect(sx + 8, sy - 3, 14, 3);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#2a3366'; ctx.fillRect(sx - 26, sy - 50, 52, 40);
+      ctx.fillStyle = f ? '#fff' : '#334477'; ctx.fillRect(sx - 24, sy - 48, 48, 36);
+      ctx.fillStyle = f ? '#fff' : '#445588'; ctx.fillRect(sx - 20, sy - 44, 40, 28);
+      // Shell plates
+      ctx.fillStyle = f ? '#fff' : '#334477';
+      ctx.fillRect(sx - 20, sy - 44, 40, 4);
+      ctx.fillRect(sx - 20, sy - 36, 40, 4);
+      ctx.fillRect(sx - 20, sy - 28, 40, 4);
+      // Shell highlights
+      ctx.fillStyle = f ? '#fff' : '#556699';
+      ctx.fillRect(sx - 18, sy - 43, 36, 2);
+      ctx.fillRect(sx - 18, sy - 35, 36, 2);
+      ctx.fillRect(sx - 18, sy - 27, 36, 2);
+      // Belly
+      ctx.fillStyle = f ? '#fff' : '#667799'; ctx.fillRect(sx - 12, sy - 22, 24, 10);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#334477'; ctx.fillRect(sx - 16, sy - 66, 32, 18);
+      ctx.fillStyle = f ? '#fff' : '#445588'; ctx.fillRect(sx - 14, sy - 64, 28, 14);
+      ctx.fillStyle = f ? '#fff' : '#556699'; ctx.fillRect(sx - 12, sy - 62, 24, 10);
+      // Horn
+      ctx.fillStyle = f ? '#fff' : '#556699'; ctx.fillRect(sx + b.facing * 10, sy - 76, 8, 14);
+      ctx.fillStyle = f ? '#fff' : '#6677aa'; ctx.fillRect(sx + b.facing * 12, sy - 80, 4, 10);
+      ctx.fillStyle = f ? '#fff' : '#7788bb'; ctx.fillRect(sx + b.facing * 13, sy - 82, 2, 4);
+      // Eyes
+      ctx.fillStyle = '#ffaa00'; ctx.fillRect(sx - 10, sy - 60, 6, 5);
+      ctx.fillRect(sx + 4, sy - 60, 6, 5);
+      ctx.fillStyle = '#ffcc44'; ctx.fillRect(sx - 9, sy - 59, 4, 3);
+      ctx.fillRect(sx + 5, sy - 59, 4, 3);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx - 8, sy - 59, 2, 2);
+      ctx.fillRect(sx + 6, sy - 59, 2, 2);
+      // Mandibles
+      ctx.fillStyle = f ? '#fff' : '#334477';
+      ctx.fillRect(sx - 8, sy - 50, 4, 4);
+      ctx.fillRect(sx + 4, sy - 50, 4, 4);
+      // Antennae
+      ctx.fillStyle = f ? '#fff' : '#6677aa';
+      ctx.fillRect(sx - 6, sy - 70, 2, 5);
+      ctx.fillRect(sx + 4, sy - 70, 2, 5);
+    }
+  },
+  // 7: Crush Crawfish - claws and spinning blade
+  { name: 'CRUSH CRAWFISH', color: '#cc4422', hp: 35, w: 44, h: 50,
+    ability: 'Spinning Blade',
+    update(b, p, eb) {
+      b.timer--;
+      if (b.state === 'idle') {
+        b.facing = p.x < b.x ? -1 : 1;
+        b.x += 2 * b.facing;
+        if (b.timer <= 0) {
+          b.state = Math.random() < 0.5 ? 'claw' : 'spin'; b.timer = 35;
+        }
+      } else if (b.state === 'claw') {
+        b.x += 7 * b.facing;
+        if (b.timer <= 0) {
+          b.state = 'idle'; b.timer = 30;
+          eb.push(new EnemyBullet(b.x + b.facing * 25, b.y - 25, b.facing * 5, -1));
+          spawnParticles(b.x + b.facing * 20, b.y - 25, '#cc4422', 6);
+        }
+      } else if (b.state === 'spin') {
+        if (b.timer % 5 === 0) {
+          const a = b.frame * 0.15;
+          eb.push(new EnemyBullet(b.x, b.y - 25, Math.cos(a) * 4, Math.sin(a) * 4));
+        }
+        if (b.timer <= 0) { b.state = 'idle'; b.timer = 35; }
+      }
+    },
+    draw(b) {
+      const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx - 18, sy - 2, 36, 3);
+      // Legs
+      ctx.fillStyle = f ? '#fff' : '#992211'; ctx.fillRect(sx - 14, sy - 8, 8, 8);
+      ctx.fillRect(sx + 6, sy - 8, 8, 8);
+      ctx.fillStyle = f ? '#fff' : '#aa3318'; ctx.fillRect(sx - 12, sy - 6, 5, 4);
+      ctx.fillRect(sx + 7, sy - 6, 5, 4);
+      ctx.fillStyle = f ? '#fff' : '#cc4422'; ctx.fillRect(sx - 16, sy - 2, 10, 2);
+      ctx.fillRect(sx + 6, sy - 2, 10, 2);
+      // Body
+      ctx.fillStyle = f ? '#fff' : '#992211'; ctx.fillRect(sx - 18, sy - 46, 36, 38);
+      ctx.fillStyle = f ? '#fff' : '#aa3318'; ctx.fillRect(sx - 16, sy - 44, 32, 34);
+      ctx.fillStyle = f ? '#fff' : '#cc4422'; ctx.fillRect(sx - 14, sy - 42, 28, 30);
+      // Shell segments
+      ctx.fillStyle = f ? '#fff' : '#aa3318';
+      ctx.fillRect(sx - 14, sy - 36, 28, 2);
+      ctx.fillRect(sx - 14, sy - 28, 28, 2);
+      // Belly
+      ctx.fillStyle = f ? '#fff' : '#dd6644'; ctx.fillRect(sx - 8, sy - 24, 16, 12);
+      ctx.fillStyle = f ? '#fff' : '#ee8866'; ctx.fillRect(sx - 6, sy - 22, 12, 8);
+      // Head
+      ctx.fillStyle = f ? '#fff' : '#882210'; ctx.fillRect(sx - 14, sy - 58, 28, 14);
+      ctx.fillStyle = f ? '#fff' : '#aa3318'; ctx.fillRect(sx - 12, sy - 56, 24, 10);
+      ctx.fillStyle = f ? '#fff' : '#cc4422'; ctx.fillRect(sx - 10, sy - 54, 20, 6);
+      // Eyes
+      ctx.fillStyle = '#ffcc00'; ctx.fillRect(sx - 8, sy - 53, 5, 4);
+      ctx.fillRect(sx + 3, sy - 53, 5, 4);
+      ctx.fillStyle = '#ffee44'; ctx.fillRect(sx - 7, sy - 52, 3, 2);
+      ctx.fillRect(sx + 4, sy - 52, 3, 2);
+      ctx.fillStyle = '#fff'; ctx.fillRect(sx - 6, sy - 52, 1, 1);
+      ctx.fillRect(sx + 5, sy - 52, 1, 1);
+      // Antennae
+      ctx.fillStyle = f ? '#fff' : '#ee5533';
+      ctx.fillRect(sx - 6, sy - 62, 2, 5);
+      ctx.fillRect(sx + 4, sy - 62, 2, 5);
+      // Claw arms
+      ctx.fillStyle = f ? '#fff' : '#cc4422'; ctx.fillRect(sx - 26, sy - 42, 14, 6);
+      ctx.fillRect(sx + 12, sy - 42, 14, 6);
+      ctx.fillStyle = f ? '#fff' : '#dd5533'; ctx.fillRect(sx - 24, sy - 41, 10, 4);
+      ctx.fillRect(sx + 14, sy - 41, 10, 4);
+      // Claws - upper jaw
+      ctx.fillStyle = f ? '#fff' : '#ee5533'; ctx.fillRect(sx - 34, sy - 44, 10, 6);
+      ctx.fillRect(sx + 24, sy - 44, 10, 6);
+      // Claws - lower jaw
+      ctx.fillStyle = f ? '#fff' : '#dd4422'; ctx.fillRect(sx - 36, sy - 36, 12, 6);
+      ctx.fillRect(sx + 24, sy - 36, 12, 6);
+      // Claw tips
+      ctx.fillStyle = f ? '#fff' : '#ff6644'; ctx.fillRect(sx - 36, sy - 38, 4, 8);
+      ctx.fillRect(sx + 32, sy - 38, 4, 8);
+      // Claw inner
+      ctx.fillStyle = f ? '#fff' : '#992211'; ctx.fillRect(sx - 32, sy - 40, 6, 2);
+      ctx.fillRect(sx + 26, sy - 40, 6, 2);
+      // Spin animation
+      if (b.state === 'spin' && !f) {
+        const a = b.frame * 0.15;
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(sx + Math.cos(a) * 12 - 3, sy - 30 + Math.sin(a) * 12 - 3, 6, 6);
+        ctx.globalAlpha = 1;
+      }
+    }
+  },
+];
+
+// Final boss: Kaiser Sigma
+const SIGMA = {
+  name: 'KAISER SIGMA', color: '#ddaa00', hp: 60, w: 55, h: 70, isFinal: true,
+  ability: null,
+  update(b, p, eb) {
+    b.timer--;
+    if (b.state === 'idle') {
+      b.facing = p.x < b.x ? -1 : 1;
+      b.x += 2 * b.facing;
+      if (b.timer <= 0) {
+        const r = Math.random();
+        b.state = r < 0.3 ? 'charge' : r < 0.6 ? 'slam' : 'orbs';
+        b.timer = 40;
+      }
+    } else if (b.state === 'charge') {
+      b.x += 8 * b.facing;
+      if (b.frame % 3 === 0) spawnParticles(b.x, b.y - 30, '#ddaa00', 2);
+      if (b.timer <= 0) {
+        b.state = 'idle'; b.timer = 25;
+        for (let i = -3; i <= 3; i++)
+          eb.push(new EnemyBullet(b.x + i * 30, b.groundY - 8, i * 2, -3));
+      }
+    } else if (b.state === 'slam') {
+      if (b.timer === 38) b.vy = -16;
+      b.vy += 0.7; b.y += b.vy;
+      if (b.y < b.groundY) b.x += (p.x > b.x ? 3 : -3);
+      if (b.y >= b.groundY) {
+        b.y = b.groundY; b.vy = 0; b.state = 'idle'; b.timer = 30;
+        for (let i = -5; i <= 5; i++) if (i !== 0)
+          eb.push(new EnemyBullet(b.x + i * 22, b.groundY - 8, i * 2, -4));
+        spawnParticles(b.x, b.groundY, '#ffaa00', 20);
+      }
+    } else if (b.state === 'orbs') {
+      if (b.timer % 5 === 0) {
+        const angle = Math.atan2(p.y - b.y + 30, p.x - b.x);
+        eb.push(new EnemyBullet(b.x, b.y - 35, Math.cos(angle) * 5, Math.sin(angle) * 5));
+        spawnParticles(b.x, b.y - 35, '#ddaa00', 2);
+      }
+      if (b.timer <= 0) { b.state = 'idle'; b.timer = 25; }
+    }
+  },
+  draw(b) {
+    const sx = b.x - camera, sy = b.y, f = b.flash > 0;
+    // Aura - pulsing energy field
+    const auraR = 48 + Math.sin(b.frame * 0.08) * 5;
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath(); ctx.arc(sx, sy - 35, auraR + 8, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = '#ddaa00';
+    ctx.beginPath(); ctx.arc(sx, sy - 35, auraR, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(sx - 28, sy - 2, 56, 3);
+    // Legs
+    ctx.fillStyle = f ? '#fff' : '#886600'; ctx.fillRect(sx - 18, sy - 10, 12, 10);
+    ctx.fillRect(sx + 6, sy - 10, 12, 10);
+    ctx.fillStyle = f ? '#fff' : '#997700'; ctx.fillRect(sx - 16, sy - 8, 8, 5);
+    ctx.fillRect(sx + 8, sy - 8, 8, 5);
+    ctx.fillStyle = f ? '#fff' : '#aa8800'; ctx.fillRect(sx - 20, sy - 3, 14, 3);
+    ctx.fillRect(sx + 6, sy - 3, 14, 3);
+    // Body
+    ctx.fillStyle = f ? '#fff' : '#aa7700'; ctx.fillRect(sx - 24, sy - 60, 48, 50);
+    ctx.fillStyle = f ? '#fff' : '#ccaa00'; ctx.fillRect(sx - 22, sy - 58, 44, 46);
+    ctx.fillStyle = f ? '#fff' : '#ddbb22'; ctx.fillRect(sx - 18, sy - 54, 36, 38);
+    // Chest emblem
+    ctx.fillStyle = f ? '#fff' : '#ffcc00'; ctx.fillRect(sx - 8, sy - 48, 16, 12);
+    ctx.fillStyle = f ? '#fff' : '#ffdd44'; ctx.fillRect(sx - 6, sy - 46, 12, 8);
+    ctx.fillStyle = '#ff4400'; ctx.fillRect(sx - 3, sy - 44, 6, 4);
+    ctx.fillStyle = '#ff6622'; ctx.fillRect(sx - 2, sy - 43, 4, 2);
+    // Panel lines
+    ctx.fillStyle = f ? '#fff' : '#997700';
+    ctx.fillRect(sx - 22, sy - 40, 44, 1);
+    ctx.fillRect(sx - 22, sy - 28, 44, 1);
+    // Shoulders - large ornate
+    ctx.fillStyle = f ? '#fff' : '#aa8800'; ctx.fillRect(sx - 32, sy - 60, 14, 22);
+    ctx.fillRect(sx + 18, sy - 60, 14, 22);
+    ctx.fillStyle = f ? '#fff' : '#ccaa00'; ctx.fillRect(sx - 30, sy - 58, 10, 18);
+    ctx.fillRect(sx + 20, sy - 58, 10, 18);
+    ctx.fillStyle = f ? '#fff' : '#ddbb22'; ctx.fillRect(sx - 28, sy - 56, 6, 14);
+    ctx.fillRect(sx + 22, sy - 56, 6, 14);
+    // Shoulder gems
+    ctx.fillStyle = '#ff2200'; ctx.fillRect(sx - 27, sy - 52, 4, 4);
+    ctx.fillRect(sx + 23, sy - 52, 4, 4);
+    ctx.fillStyle = '#ff4422'; ctx.fillRect(sx - 26, sy - 51, 2, 2);
+    ctx.fillRect(sx + 24, sy - 51, 2, 2);
+    // Head
+    ctx.fillStyle = f ? '#fff' : '#886600'; ctx.fillRect(sx - 17, sy - 80, 34, 24);
+    ctx.fillStyle = f ? '#fff' : '#aa7700'; ctx.fillRect(sx - 15, sy - 78, 30, 20);
+    ctx.fillStyle = f ? '#fff' : '#ccaa00'; ctx.fillRect(sx - 13, sy - 76, 26, 16);
+    // Crown - three prongs
+    ctx.fillStyle = f ? '#fff' : '#ddbb00'; ctx.fillRect(sx - 5, sy - 92, 10, 14);
+    ctx.fillStyle = f ? '#fff' : '#ffcc00'; ctx.fillRect(sx - 3, sy - 94, 6, 10);
+    ctx.fillRect(sx - 14, sy - 88, 8, 10);
+    ctx.fillRect(sx + 6, sy - 88, 8, 10);
+    ctx.fillStyle = f ? '#fff' : '#ffdd44'; ctx.fillRect(sx - 2, sy - 92, 4, 6);
+    ctx.fillRect(sx - 12, sy - 86, 4, 6);
+    ctx.fillRect(sx + 8, sy - 86, 4, 6);
+    // Crown gem
+    ctx.fillStyle = '#ff0000'; ctx.fillRect(sx - 2, sy - 86, 4, 4);
+    ctx.fillStyle = '#ff4444'; ctx.fillRect(sx - 1, sy - 85, 2, 2);
+    // Eyes - menacing red
+    ctx.fillStyle = '#cc0000'; ctx.fillRect(sx - 10, sy - 74, 8, 5);
+    ctx.fillRect(sx + 2, sy - 74, 8, 5);
+    ctx.fillStyle = '#ff4400'; ctx.fillRect(sx - 9, sy - 73, 6, 3);
+    ctx.fillRect(sx + 3, sy - 73, 6, 3);
+    ctx.fillStyle = '#ff8844'; ctx.fillRect(sx - 8, sy - 73, 3, 2);
+    ctx.fillRect(sx + 5, sy - 73, 3, 2);
+    ctx.fillStyle = '#fff'; ctx.fillRect(sx - 7, sy - 73, 1, 1);
+    ctx.fillRect(sx + 6, sy - 73, 1, 1);
+    // Scar
+    ctx.fillStyle = '#660000'; ctx.fillRect(sx - 2, sy - 70, 3, 12);
+    ctx.fillStyle = '#880000'; ctx.fillRect(sx - 1, sy - 69, 1, 10);
+    // Chin
+    ctx.fillStyle = f ? '#fff' : '#aa8800'; ctx.fillRect(sx - 8, sy - 60, 16, 4);
+    // Glow effect during attacks
+    if (b.state !== 'idle' && !f) {
+      ctx.globalAlpha = 0.2 + Math.sin(b.frame * 0.15) * 0.1;
+      ctx.fillStyle = '#ffaa00';
+      ctx.fillRect(sx - 26, sy - 62, 52, 56);
+      ctx.globalAlpha = 1;
+    }
+  }
+};
+
+// ==================== BOSS INSTANCE ====================
+class Boss {
+  constructor(def, x, groundY) {
+    this.def = def;
+    this.name = def.name;
+    this.color = def.color;
+    this.maxHp = def.hp;
+    this.hp = def.hp;
+    this.x = x; this.y = groundY;
+    this.groundY = groundY;
+    this.floatY = groundY - 120;
+    this.w = def.w; this.h = def.h;
+    this.alive = true; this.facing = -1;
+    this.state = 'idle'; this.timer = 60;
+    this.frame = 0; this.vy = 0; this.vx = 0;
+    this.flash = 0; this.deathTimer = 0;
+    this.introTimer = def.isFinal ? 120 : 80;
+    this.arenaL = x - 350; this.arenaR = x + 350;
+  }
+  update(p, eb) {
+    this.frame++;
+    if (this.flash > 0) this.flash--;
+    if (this.introTimer > 0) { this.introTimer--; return; }
+    if (this.deathTimer > 0) {
+      this.deathTimer--;
+      if (this.deathTimer % 5 === 0) spawnParticles(this.x+(Math.random()-0.5)*40, this.y-Math.random()*50, this.color, 6);
+      return;
+    }
+    this.def.update(this, p, eb);
+    if (this.x < this.arenaL + 30) this.x = this.arenaL + 30;
+    if (this.x > this.arenaR - 30) this.x = this.arenaR - 30;
+  }
+  hit(dmg) {
+    this.hp -= dmg; this.flash = 6;
+    if (this.hp <= 0) { this.hp = 0; this.alive = false; this.deathTimer = 60; return true; }
+    return false;
+  }
+  draw() {
+    if (this.deathTimer > 0 && Math.floor(this.deathTimer / 3) % 2 === 0) return;
+    this.def.draw(this);
+  }
+  drawHealthBar() {
+    const barX = W - 10, barY = 30, segH = 2, maxSegs = 20;
+    const filled = Math.ceil((this.hp / this.maxHp) * maxSegs);
+    ctx.fillStyle = this.color;
+    ctx.font = '4px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(this.name, barX + 2, barY - 3);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(barX, barY, 5, maxSegs * (segH + 1) + 1);
+    for (let i = 0; i < maxSegs; i++) {
+      ctx.fillStyle = i < filled ? (this.hp/this.maxHp > 0.3 ? this.color : '#ff2222') : '#222';
+      ctx.fillRect(barX + 1, barY + (maxSegs - 1 - i) * (segH + 1) + 1, 3, segH);
+    }
+    ctx.textAlign = 'left';
+  }
+}
+
+// ==================== STAGE THEMES ====================
+const THEMES = {
+  0: { // Tunnel Rhino - Quarry
+    sky:['#1a1408','#221a10','#2a2218','#332a20','#3b3228'], skyFill:'#332a20',
+    far:'#2a2018', near:'#332818', bgCol:'#3a3020', bgWin:'#ffaa44',
+    ground:['#887766','#665544','#554433','#998877'],
+    plat:['#aa9988','#887766','#665544','#bbaa99'], spike:['#886644','#aa8866'],
+  },
+  1: { // Blast Hornet - Military Base
+    sky:['#181820','#202028','#282830','#303038','#383840'], skyFill:'#303038',
+    far:'#1a1a22', near:'#22222a', bgCol:'#2a2a32', bgWin:'#ccaa00',
+    ground:['#556655','#445544','#334433','#667766'],
+    plat:['#778877','#556655','#445544','#889988'], spike:['#ccaa00','#eedd44'],
+  },
+  2: { // Toxic Seahorse - Dam
+    sky:['#0a0818','#120e22','#1a142c','#221a36','#2a2040'], skyFill:'#1a142c',
+    far:'#141028', near:'#1c1830', bgCol:'#241e38', bgWin:'#66ff88',
+    ground:['#446644','#335533','#224422','#558855'],
+    plat:['#556688','#445577','#334466','#667799'], spike:['#8844cc','#aa66ee'],
+  },
+  3: { // Volt Catfish - Power Plant
+    sky:['#080820','#101038','#182050','#202860','#283070'], skyFill:'#182050',
+    far:'#101838', near:'#182848', bgCol:'#203050', bgWin:'#44ccff',
+    ground:['#445566','#334455','#223344','#556677'],
+    plat:['#5588aa','#446688','#335577','#66aacc'], spike:['#2288ff','#44aaff'],
+  },
+  4: { // Blizzard Buffalo - Frozen Town
+    sky:['#102030','#183040','#204050','#285060','#306070'], skyFill:'#204050',
+    far:'#1a2a40', near:'#223350', bgCol:'#2a3a55', bgWin:'#aaddff',
+    ground:['#bbccdd','#99aabb','#8899aa','#ccddee'],
+    plat:['#ddeeff','#bbccdd','#99aabb','#eeffff'], spike:['#4488bb','#66aadd'],
+  },
+  5: { // Neon Tiger - Jungle
+    sky:['#040810','#061018','#081820','#0a2028','#0c2830'], skyFill:'#081820',
+    far:'#0a1a10', near:'#0c2218', bgCol:'#0e2a1a', bgWin:'#88cc44',
+    ground:['#2a4422','#1a3318','#102210','#3a5533'],
+    plat:['#446633','#335522','#224411','#557744'], spike:['#ff6600','#ff8844'],
+  },
+  6: { // Gravity Beetle - Aircraft Carrier
+    sky:['#3366aa','#4477bb','#5588cc','#6699dd','#77aaee'], skyFill:'#6699dd',
+    far:'#5577aa', near:'#4466aa', bgCol:'#3a5080', bgWin:'#ffffff',
+    ground:['#667788','#556677','#445566','#778899'],
+    plat:['#8899aa','#667788','#556677','#99aabb'], spike:['#445588','#6677aa'],
+  },
+  7: { // Crush Crawfish - Shipwreck
+    sky:['#0a1018','#101820','#182028','#202830','#283038'], skyFill:'#182028',
+    far:'#0c1820', near:'#142028', bgCol:'#1a2830', bgWin:'#44ccaa',
+    ground:['#885544','#774433','#663322','#996655'],
+    plat:['#668877','#557766','#446655','#779988'], spike:['#cc4422','#ee6644'],
+  },
+  '-1': { // Kaiser Sigma - Doppler's Lab
+    sky:['#1a0000','#280000','#360000','#440808','#521010'], skyFill:'#360000',
+    far:'#280808', near:'#361010', bgCol:'#441818', bgWin:'#ff2222',
+    ground:['#553333','#442222','#331111','#664444'],
+    plat:['#886666','#664444','#553333','#aa8888'], spike:['#ff0000','#ff4444'],
+  },
+};
+const DEFAULT_THEME = {
+  sky:['#08082a','#0a0a32','#0c1038','#101840','#142050'], skyFill:'#101840',
+  far:'#14143a', near:'#1a1a44', bgCol:'#222250', bgWin:'#ffcc44',
+  ground:['#667788','#556677','#445566','#778899'],
+  plat:['#7788aa','#556677','#3a4a5a','#8899bb'], spike:['#881111','#ff4444'],
+};
+function getTheme() {
+  if (state === 'playing' && currentStage !== undefined) return THEMES[currentStage] || DEFAULT_THEME;
+  return DEFAULT_THEME;
+}
+
+// ==================== LEVEL ====================
+class Level {
+  constructor() {
+    this.platforms = []; this.walls = []; this.coins = [];
+    this.spikes = []; this.enemies = []; this.enemyBullets = [];
+    this.groundGaps = new Set();
+    this.groundY = H - 20; this.generated = 0; this.difficulty = 1;
+  }
+  generate(startX, endX) {
+    let x = Math.max(startX, this.generated);
+    while (x < endX) {
+      this.difficulty = 1 + x / 3000;
+      if (Math.random() < 0.008 * Math.min(this.difficulty, 3)) {
+        const py = this.groundY - 50 - Math.random() * 80;
+        const pw = 60 + Math.random() * 80;
+        this.platforms.push({ x, y: py, w: pw });
+        if (Math.random() < 0.6) this.coins.push({ x: x + pw/2, y: py - 16 });
+      }
+      if (Math.random() < 0.004 * Math.min(this.difficulty, 2.5) && x > 600) {
+        const wh = 60 + Math.random() * 60;
+        this.walls.push({ x, y: this.groundY - wh, w: TILE, h: wh });
+      }
+      if (Math.random() < 0.006) this.coins.push({ x, y: this.groundY - 16 });
+      if (Math.random() < 0.004 * Math.min(this.difficulty, 3) && x > 400)
+        this.spikes.push({ x, y: this.groundY - 8 });
+      if (Math.random() < 0.002 && x > 800) {
+        for (let i = 0; i < 3; i++) this.groundGaps.add(Math.floor((x + i * TILE) / TILE));
+      }
+      if (Math.random() < 0.003 * Math.min(this.difficulty, 3) && x > 300) {
+        const kinds = ['walker', 'walker', 'turret'];
+        if (this.difficulty > 1.5) kinds.push('flyer');
+        const kind = kinds[Math.floor(Math.random() * kinds.length)];
+        const ey = kind === 'flyer' ? this.groundY - 40 - Math.random() * 60 : this.groundY;
+        this.enemies.push(new Enemy(x, ey, kind));
+      }
+      x += TILE;
+    }
+    this.generated = Math.max(this.generated, endX);
+  }
+  cleanup(camX) {
+    const cut = camX - 200;
+    this.platforms = this.platforms.filter(p => p.x + p.w > cut);
+    this.walls = this.walls.filter(w => w.x > cut);
+    this.coins = this.coins.filter(c => c.x > cut);
+    this.spikes = this.spikes.filter(s => s.x > cut);
+    this.enemies = this.enemies.filter(e => e.x > cut && e.alive);
+    this.enemyBullets = this.enemyBullets.filter(b => b.alive && b.x > cut && b.x < camX + W + 100);
+    for (const g of this.groundGaps) if (g * TILE < cut) this.groundGaps.delete(g);
+  }
+  draw() {
+    const t = getTheme();
+    // Ground with detailed tile patterns
+    for (let sx = 0; sx < W; sx += TILE) {
+      const gx = Math.floor((camera + sx) / TILE);
+      if (!this.groundGaps.has(gx)) {
+        // Top edge highlight
+        ctx.fillStyle = t.ground[3]; ctx.fillRect(sx, this.groundY, TILE, 1);
+        // Surface
+        ctx.fillStyle = t.ground[0]; ctx.fillRect(sx, this.groundY + 1, TILE, 3);
+        // Main fill
+        ctx.fillStyle = t.ground[1]; ctx.fillRect(sx, this.groundY + 4, TILE, H - this.groundY - 4);
+        // Tile pattern - brick-like with offset rows
+        ctx.fillStyle = t.ground[2];
+        const tileOff = (gx % 2) * 8;
+        for (let ty = this.groundY + 4; ty < H; ty += 8) {
+          ctx.fillRect(sx, ty, TILE, 1); // horizontal mortar
+          ctx.fillRect(sx + tileOff, ty, 1, 8); // vertical mortar
+          ctx.fillRect(sx + tileOff + 8, ty, 1, Math.min(8, H - ty));
+        }
+        // Surface detail - random cracks and rivets
+        const seed = (gx * 7 + 13) % 17;
+        if (seed < 4) {
+          ctx.fillStyle = t.ground[2];
+          ctx.fillRect(sx + (seed * 3) % 12, this.groundY + 2, 1, 2);
+        }
+        if (seed > 10) {
+          ctx.fillStyle = t.ground[3];
+          ctx.fillRect(sx + (seed * 5) % 14, this.groundY + 1, 2, 1);
+        }
+        // Edge shadow for gaps
+        if (this.groundGaps.has(gx - 1)) {
+          ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(sx, this.groundY, 2, 10);
+        }
+        if (this.groundGaps.has(gx + 1)) {
+          ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(sx + 14, this.groundY, 2, 10);
+        }
+      }
+    }
+    // Platforms with detailed edges
+    for (const p of this.platforms) {
+      const px = p.x - camera;
+      // Bottom shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(px + 2, p.y + 8, p.w - 2, 2);
+      // Main body
+      ctx.fillStyle = t.plat[2]; ctx.fillRect(px, p.y + 6, p.w, 3);
+      ctx.fillStyle = t.plat[1]; ctx.fillRect(px, p.y + 2, p.w, 5);
+      // Top surface
+      ctx.fillStyle = t.plat[0]; ctx.fillRect(px, p.y, p.w, 2);
+      // Top highlight
+      ctx.fillStyle = t.plat[3]; ctx.fillRect(px + 1, p.y, p.w - 2, 1);
+      // Left/right edges
+      ctx.fillStyle = t.plat[2]; ctx.fillRect(px, p.y, 1, 8);
+      ctx.fillRect(px + p.w - 1, p.y, 1, 8);
+      // Surface rivets
+      for (let rx = px + 4; rx < px + p.w - 4; rx += 12) {
+        ctx.fillStyle = t.plat[3]; ctx.fillRect(rx, p.y + 2, 2, 2);
+        ctx.fillStyle = t.plat[2]; ctx.fillRect(rx + 1, p.y + 3, 1, 1);
+      }
+      // Panel lines
+      ctx.fillStyle = t.plat[2];
+      for (let lx = px + 8; lx < px + p.w - 4; lx += 16) {
+        ctx.fillRect(lx, p.y + 2, 1, 5);
+      }
+      // Edge caps
+      ctx.fillStyle = t.plat[0]; ctx.fillRect(px, p.y + 1, 2, 6);
+      ctx.fillRect(px + p.w - 2, p.y + 1, 2, 6);
+      ctx.fillStyle = t.plat[3]; ctx.fillRect(px + 1, p.y + 2, 1, 4);
+      ctx.fillRect(px + p.w - 2, p.y + 2, 1, 4);
+    }
+    // Walls with brick pattern
+    for (const w of this.walls) {
+      const wx = w.x - camera;
+      // Main fill
+      ctx.fillStyle = t.plat[1]; ctx.fillRect(wx, w.y, w.w, w.h);
+      // Left highlight
+      ctx.fillStyle = t.plat[3]; ctx.fillRect(wx, w.y, 1, w.h);
+      // Right shadow
+      ctx.fillStyle = t.plat[2]; ctx.fillRect(wx + w.w - 1, w.y, 1, w.h);
+      // Top cap
+      ctx.fillStyle = t.plat[0]; ctx.fillRect(wx, w.y, w.w, 2);
+      ctx.fillStyle = t.plat[3]; ctx.fillRect(wx + 1, w.y, w.w - 2, 1);
+      // Brick lines
+      for (let j = 0; j < w.h; j += 8) {
+        ctx.fillStyle = t.plat[2]; ctx.fillRect(wx, w.y + j, w.w, 1);
+        // Alternating vertical line
+        const vx = (Math.floor(j / 8) % 2 === 0) ? wx + 4 : wx + 10;
+        if (vx < wx + w.w) ctx.fillRect(vx, w.y + j, 1, 8);
+      }
+      // Corner rivets
+      ctx.fillStyle = t.plat[0];
+      ctx.fillRect(wx + 2, w.y + 3, 2, 2);
+      ctx.fillRect(wx + 2, w.y + w.h - 5, 2, 2);
+    }
+    // Coins - detailed spinning bolts
+    for (const c of this.coins) {
+      const cx = c.x - camera, cy = c.y;
+      const phase = Math.floor(Date.now() / 100) % 6;
+      const cw = [4, 3, 2, 1, 2, 3][phase];
+      // Glow
+      ctx.globalAlpha = 0.3; ctx.fillStyle = '#ffcc00';
+      ctx.fillRect(cx - cw - 1, cy - 4, cw * 2 + 2, 8);
+      ctx.globalAlpha = 1;
+      // Outer
+      ctx.fillStyle = '#cc9900'; ctx.fillRect(cx - cw, cy - 4, cw * 2, 8);
+      // Inner
+      ctx.fillStyle = '#ffd700'; ctx.fillRect(cx - cw + 1, cy - 3, Math.max(1, cw * 2 - 2), 6);
+      // Highlight
+      ctx.fillStyle = '#ffee88'; ctx.fillRect(cx - cw + 1, cy - 3, Math.max(1, cw - 1), 3);
+      // Shine line
+      if (cw > 2) {
+        ctx.fillStyle = '#fff'; ctx.fillRect(cx - cw + 1, cy - 2, 1, 2);
+      }
+      // Letter/symbol
+      if (cw >= 3) {
+        ctx.fillStyle = '#cc8800'; ctx.fillRect(cx - 1, cy - 2, 2, 4);
+        ctx.fillRect(cx - 2, cy - 1, 4, 2);
+      }
+    }
+    // Spikes - detailed with multiple prongs
+    for (const s of this.spikes) {
+      const spx = s.x - camera, spy = s.y;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(spx - 5, spy + 5, 10, 2);
+      // Base
+      ctx.fillStyle = t.spike[0]; ctx.fillRect(spx - 5, spy + 4, 10, 3);
+      // Center spike
+      ctx.fillStyle = t.spike[0];
+      ctx.beginPath(); ctx.moveTo(spx - 3, spy + 4); ctx.lineTo(spx, spy - 6); ctx.lineTo(spx + 3, spy + 4); ctx.fill();
+      // Left spike
+      ctx.beginPath(); ctx.moveTo(spx - 6, spy + 5); ctx.lineTo(spx - 3, spy - 2); ctx.lineTo(spx, spy + 5); ctx.fill();
+      // Right spike
+      ctx.beginPath(); ctx.moveTo(spx, spy + 5); ctx.lineTo(spx + 3, spy - 2); ctx.lineTo(spx + 6, spy + 5); ctx.fill();
+      // Highlights
+      ctx.fillStyle = t.spike[1];
+      ctx.beginPath(); ctx.moveTo(spx - 1, spy + 3); ctx.lineTo(spx, spy - 4); ctx.lineTo(spx + 1, spy + 3); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(spx - 4, spy + 4); ctx.lineTo(spx - 3, spy); ctx.lineTo(spx - 2, spy + 4); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(spx + 2, spy + 4); ctx.lineTo(spx + 3, spy); ctx.lineTo(spx + 4, spy + 4); ctx.fill();
+      // Tip gleam
+      ctx.fillStyle = '#fff'; ctx.fillRect(spx, spy - 5, 1, 1);
+    }
+    for (const e of this.enemies) e.draw();
+    for (const eb of this.enemyBullets) eb.draw();
+  }
+}
+
+// ==================== BACKGROUND ====================
+const stars = [];
+for (let i = 0; i < 80; i++) stars.push({ x: Math.random()*W*6, y: Math.random()*(H*0.45), b: Math.random(), sz: Math.random() < 0.15 ? 2 : 1 });
+
+function drawBG() {
+  const t = getTheme();
+  // Sky gradient - smoother with more bands
+  const bandH = Math.ceil(H * 0.4 / t.sky.length);
+  for (let i = 0; i < t.sky.length; i++) {
+    ctx.fillStyle = t.sky[i]; ctx.fillRect(0, i * bandH, W, bandH + 1);
+  }
+  ctx.fillStyle = t.skyFill; ctx.fillRect(0, t.sky.length * bandH, W, H);
+
+  // Stars - twinkling with varying brightness
+  for (const s of stars) {
+    const sx = ((s.x - camera * 0.02) % (W*6) + W*6) % (W*6);
+    if (sx < W) {
+      const twinkle = Math.sin(Date.now() * 0.003 + s.b * 100) * 0.3 + 0.7;
+      ctx.globalAlpha = twinkle * (0.4 + s.b * 0.6);
+      ctx.fillStyle = s.b > 0.8 ? '#ccddff' : s.b > 0.5 ? '#aabbdd' : '#8899bb';
+      ctx.fillRect(Math.floor(sx), Math.floor(s.y), s.sz, s.sz);
+      // Cross sparkle on bright stars
+      if (s.sz === 2 && twinkle > 0.85) {
+        ctx.fillRect(Math.floor(sx) - 1, Math.floor(s.y) + 1, 1, 1);
+        ctx.fillRect(Math.floor(sx) + 2, Math.floor(s.y) + 1, 1, 1);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Far mountains - jagged peaks with snow caps
+  for (let x = 0; x < W; x++) {
+    const wx = (x + camera * 0.05) * 0.015;
+    const mh = Math.sin(wx) * 18 + Math.sin(wx*2.3) * 10 + Math.sin(wx*5.7) * 3;
+    const baseY = H * 0.55 - mh;
+    ctx.fillStyle = t.far; ctx.fillRect(x, baseY, 1, H);
+    // Mountain highlight (left side of peaks)
+    if (Math.sin(wx) > 0.6) {
+      ctx.fillStyle = t.near; ctx.fillRect(x, baseY, 1, 2);
+    }
+  }
+
+  // Near mountains - larger, more detailed
+  for (let x = 0; x < W; x++) {
+    const wx = (x + camera * 0.1) * 0.02;
+    const mh = Math.sin(wx*1.1) * 14 + Math.sin(wx*2.7+1) * 8 + Math.sin(wx*6.1) * 2;
+    const baseY = H * 0.65 - mh;
+    ctx.fillStyle = t.near; ctx.fillRect(x, baseY, 1, H);
+    // Ridge detail
+    if (x % 3 === 0 && Math.sin(wx * 3) > 0.5) {
+      ctx.fillStyle = t.far; ctx.fillRect(x, baseY + 4, 1, 2);
+    }
+  }
+
+  // Background buildings/structures - detailed cityscape
+  for (let x = 0; x < W; x += 3) {
+    const wx = Math.floor((x + camera * 0.15) / 3);
+    const bh = ((wx * 7 + 13) % 19) + 5;
+    const baseY = H * 0.7;
+    // Building shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x + 2, baseY - bh + 2, 2, bh);
+    // Building body
+    ctx.fillStyle = t.bgCol; ctx.fillRect(x, baseY - bh, 2, bh);
+    // Roof
+    if (bh > 12 && (wx * 3 + 5) % 7 < 3) {
+      ctx.fillRect(x - 1, baseY - bh - 2, 4, 2); // flat roof overhang
+    }
+    // Windows - multiple floors
+    const winCol = t.bgWin;
+    for (let wy = baseY - bh + 3; wy < baseY - 2; wy += 4) {
+      if ((wx * 11 + wy * 3 + 7) % 5 < 2) {
+        // Lit window
+        ctx.fillStyle = winCol; ctx.fillRect(x, wy, 1, 2);
+        // Glow
+        ctx.globalAlpha = 0.15; ctx.fillRect(x - 1, wy, 3, 2); ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // Foreground detail layer - pipes, cables, debris
+  for (let x = 0; x < W; x += 8) {
+    const wx = Math.floor((x + camera * 0.2) / 8);
+    if ((wx * 13 + 7) % 11 < 2) {
+      // Horizontal pipe
+      ctx.fillStyle = t.bgCol; ctx.fillRect(x, H * 0.74, 6, 2);
+      ctx.fillStyle = t.near; ctx.fillRect(x, H * 0.74, 6, 1);
+    }
+  }
+}
+
+// ==================== HUD ====================
+function drawHUD() {
+  // HP bar - MMX style with frame
+  const barX = 4, barY = 18, segH = 2, barW = 7;
+  const barH = MAX_HP * (segH + 1) + 3;
+  // Frame
+  ctx.fillStyle = '#222'; ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+  ctx.fillStyle = '#444'; ctx.fillRect(barX - 1, barY - 1, barW + 2, 1);
+  ctx.fillRect(barX - 1, barY - 1, 1, barH + 2);
+  ctx.fillStyle = '#111'; ctx.fillRect(barX, barY + barH, barW, 1);
+  ctx.fillRect(barX + barW, barY, 1, barH);
+  // Background
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(barX, barY, barW, barH);
+  // Label
+  ctx.fillStyle = '#00aaff'; ctx.font = '5px monospace'; ctx.fillText('X', barX + 1, barY - 3);
+  // Health segments
+  for (let i = 0; i < MAX_HP; i++) {
+    const sy = barY + (MAX_HP - 1 - i) * (segH + 1) + 2;
+    if (i < player.hp) {
+      const col = player.hp > 4 ? '#00aaff' : '#cc3300';
+      const hiCol = player.hp > 4 ? '#44ccff' : '#ff5522';
+      ctx.fillStyle = col; ctx.fillRect(barX + 1, sy, 5, segH);
+      ctx.fillStyle = hiCol; ctx.fillRect(barX + 1, sy, 5, 1);
+    } else {
+      ctx.fillStyle = '#1a1a1a'; ctx.fillRect(barX + 1, sy, 5, segH);
+    }
+  }
+  // Charge indicator
+  if (player.charging > 0) {
+    const t = Math.min(player.charging / CHARGE_TIME, 1);
+    ctx.fillStyle = t >= 1 ? '#ff8800' : '#4488ff';
+    ctx.globalAlpha = 0.5 + Math.sin(Date.now() * 0.01) * 0.3;
+    ctx.fillRect(barX, barY - 3, barW, 2);
+    ctx.globalAlpha = 1;
+  }
+  // Score display
+  ctx.fillStyle = '#111'; ctx.fillRect(W - 50, 2, 48, 22);
+  ctx.fillStyle = '#333'; ctx.fillRect(W - 50, 2, 48, 1);
+  ctx.fillRect(W - 50, 2, 1, 22);
+  ctx.fillStyle = '#222'; ctx.fillRect(W - 3, 2, 1, 22);
+  ctx.fillRect(W - 50, 23, 48, 1);
+  ctx.fillStyle = '#eee'; ctx.font = '5px monospace'; ctx.textAlign = 'right';
+  ctx.fillText(`${player.score}`, W - 5, 10);
+  ctx.fillStyle = '#aaa';
+  ctx.fillText(`${Math.floor(player.distance)}m`, W - 5, 17);
+  if (currentStage >= 0) {
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillText(BOSSES[currentStage].name.split(' ')[1], W - 5, 23);
+  } else if (currentStage === -1) {
+    ctx.fillStyle = '#ff4444';
+    ctx.fillText('SIGMA', W - 5, 23);
+  }
+  ctx.textAlign = 'left';
+}
+
+// ==================== SCREENS ====================
+function drawTitle() {
+  drawBG();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#005588'; ctx.font = 'bold 14px monospace';
+  ctx.fillText('MEGA MAN X3', W/2 + 1, 46);
+  ctx.fillStyle = '#00aaff';
+  ctx.fillText('MEGA MAN X3', W/2, 45);
+  ctx.fillStyle = '#aaa'; ctx.font = '5px monospace';
+  ctx.fillText('~ TERMINAL EDITION ~', W/2, 56);
+  drawSprite(W/2, 95, 1, false);
+  ctx.font = '4px monospace'; ctx.fillStyle = '#888';
+  ctx.fillText('ARROWS Move  SPACE Jump  Z Shoot', W/2, 115);
+  ctx.fillText('X Dash  Hold Z to Charge', W/2, 123);
+  ctx.fillStyle = '#ffcc00'; ctx.font = '5px monospace';
+  ctx.fillText('Defeat the 8 Mavericks!', W/2, 150);
+  ctx.fillStyle = '#fff'; ctx.font = '6px monospace';
+  if (Math.floor(Date.now()/500) % 2) ctx.fillText('PRESS ANY KEY', W/2, 200);
+  ctx.textAlign = 'left';
+}
+
+function drawStageSelect() {
+  drawBG();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 7px monospace';
+  ctx.fillText('STAGE SELECT', W/2, 14);
+  ctx.fillStyle = '#888'; ctx.font = '4px monospace';
+  ctx.fillText(`Score:${totalScore}  Mavericks:${defeatedBosses.size}/8`, W/2, 22);
+
+  const cellW = 70, cellH = 50, gap = 6;
+  const gridW = 3*cellW + 2*gap;
+  const startX = (W - gridW) / 2, startY = 30;
+  const sigmaOK = defeatedBosses.size >= 8;
+
+  for (let i = 0; i < 9; i++) {
+    const row = Math.floor(i/3), col = i % 3;
+    const px = startX + col * (cellW + gap), py = startY + row * (cellH + gap);
+    const bi = STAGE_GRID[i];
+    const isSigma = bi === -1;
+    const def = isSigma ? SIGMA : BOSSES[bi];
+    const beaten = !isSigma && defeatedBosses.has(bi);
+    const sel = i === stageSelectCursor;
+    const locked = isSigma && !sigmaOK;
+
+    ctx.fillStyle = beaten ? 'rgba(0,60,0,0.5)' : locked ? 'rgba(30,30,30,0.7)' : sel ? 'rgba(60,40,0,0.5)' : 'rgba(20,20,40,0.5)';
+    ctx.fillRect(px, py, cellW, cellH);
+    ctx.strokeStyle = sel ? '#ffcc00' : beaten ? '#44ff44' : locked ? '#333' : '#555';
+    ctx.lineWidth = sel ? 2 : 1;
+    ctx.strokeRect(px, py, cellW, cellH); ctx.lineWidth = 1;
+
+    ctx.fillStyle = locked ? '#222' : def.color;
+    ctx.fillRect(px + 1, py + 1, cellW - 2, 3);
+    ctx.fillStyle = locked ? '#444' : beaten ? '#44ff44' : '#fff';
+    ctx.font = 'bold 5px monospace';
+    ctx.fillText(locked ? '???' : def.name, px + cellW/2, py + 16);
+    if (!isSigma) {
+      ctx.fillStyle = beaten ? '#44ff44' : '#888'; ctx.font = '4px monospace';
+      ctx.fillText(beaten ? def.ability + ' \u2713' : def.ability, px + cellW/2, py + 26);
+    } else {
+      ctx.fillStyle = locked ? '#444' : '#ff4444'; ctx.font = '4px monospace';
+      ctx.fillText(locked ? 'Defeat all 8' : 'FINAL BOSS', px + cellW/2, py + 26);
+    }
+    if (beaten) {
+      ctx.fillStyle = '#44ff44'; ctx.font = 'bold 8px monospace';
+      ctx.fillText('CLEAR', px + cellW/2, py + 40);
+    }
+    if (locked) {
+      ctx.fillStyle = '#555'; ctx.font = 'bold 7px monospace';
+      ctx.fillText('LOCKED', px + cellW/2, py + 40);
+    }
+  }
+  ctx.fillStyle = '#aaa'; ctx.font = '4px monospace';
+  ctx.fillText('ARROWS select, SPACE enter', W/2, startY + 3*(cellH+gap) + 8);
+  ctx.textAlign = 'left';
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff4444'; ctx.font = 'bold 12px monospace';
+  ctx.fillText('GAME OVER', W/2, H/2 - 10);
+  ctx.fillStyle = '#fff'; ctx.font = '5px monospace';
+  ctx.fillText(`Score: ${player.score}`, W/2, H/2 + 4);
+  ctx.fillStyle = '#aaa';
+  if (Math.floor(Date.now()/500) % 2) ctx.fillText('R restart  Q title', W/2, H/2 + 20);
+  ctx.textAlign = 'left';
+}
+
+function drawBossWarning() {
+  if (!currentBoss || currentBoss.introTimer <= 0) return;
+  ctx.globalAlpha = Math.min(1, currentBoss.introTimer / 20);
+  ctx.fillStyle = currentBoss.def.isFinal ? 'rgba(40,0,0,0.7)' : 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, H/2 - 14, W, 28);
+  ctx.textAlign = 'center';
+  if (currentBoss.def.isFinal) {
+    ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 5px monospace';
+    ctx.fillText('= FINAL BOSS =', W/2, H/2 - 4);
+    ctx.fillStyle = '#ff2222'; ctx.font = 'bold 10px monospace';
+    ctx.fillText(currentBoss.name, W/2, H/2 + 8);
+  } else {
+    ctx.fillStyle = '#ff2222'; ctx.font = 'bold 8px monospace';
+    ctx.fillText(`WARNING: ${currentBoss.name}`, W/2, H/2 + 4);
+  }
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 1;
+}
+
+// ==================== GAME INIT ====================
+function initGame() {
+  defeatedBosses = new Set();
+  totalScore = 0;
+  stageSelectCursor = 0;
+}
+
+function initStage(stageIdx) {
+  currentStage = stageIdx;
+  level = new Level();
+  player = new Player(100, level.groundY);
+  player.score = totalScore;
+  camera = 0;
+  particles = [];
+  bossActive = false;
+  currentBoss = null;
+  level.generate(0, W + 500);
+}
+
+// ==================== GAME LOOP ====================
+function gameLoop() {
+  if (state === 'title') {
+    music.play('title');
+    drawTitle();
+    for (const k in justPressed) { if (justPressed[k]) { state = 'stageselect'; initGame(); break; } }
+
+  } else if (state === 'stageselect') {
+    music.play('title');
+    drawStageSelect();
+    const col = stageSelectCursor % 3, row = Math.floor(stageSelectCursor / 3);
+    if (justPressed['ArrowLeft']||justPressed['KeyA']) { stageSelectCursor = row*3+((col-1+3)%3); sfx.menuSelect(); }
+    if (justPressed['ArrowRight']||justPressed['KeyD']) { stageSelectCursor = row*3+((col+1)%3); sfx.menuSelect(); }
+    if (justPressed['ArrowUp']||justPressed['KeyW']) { stageSelectCursor = ((row-1+3)%3)*3+col; sfx.menuSelect(); }
+    if (justPressed['ArrowDown']||justPressed['KeyS']) { stageSelectCursor = ((row+1)%3)*3+col; sfx.menuSelect(); }
+    if (justPressed['Space']||justPressed['Enter']) {
+      const bi = STAGE_GRID[stageSelectCursor];
+      const isSigma = bi === -1;
+      if (isSigma && defeatedBosses.size < 8) { /* locked */ }
+      else { sfx.menuConfirm(); initStage(isSigma ? -1 : bi); state = 'playing'; }
+    }
+
+  } else if (state === 'playing') {
+    // Music
+    if (currentStage === -1) music.play('sigma');
+    else if (currentStage >= 0) music.play('stage' + currentStage);
+
+    // Input
+    if (justPressed['Space']||justPressed['ArrowUp']||justPressed['KeyW']) player.jump();
+    if (justPressed['KeyX']) player.dash();
+    if (keys['KeyZ']) player.charging++;
+    else if (player.charging > 0) player.shoot();
+
+    const scrolling = !bossActive;
+
+    // Boss spawn
+    if (!bossActive && Math.floor(player.distance) >= BOSS_DIST) {
+      const bx = player.x + W * 0.6;
+      currentBoss = new Boss(currentStage === -1 ? SIGMA : BOSSES[currentStage], bx, level.groundY);
+      bossActive = true; sfx.bossWarn();
+      level.enemies = level.enemies.filter(e => Math.abs(e.x - bx) > 400);
+      level.spikes = level.spikes.filter(s => Math.abs(s.x - bx) > 400);
+      for (let gx = Math.floor((bx-400)/TILE); gx < Math.floor((bx+400)/TILE); gx++)
+        level.groundGaps.delete(gx);
+    }
+
+    // Update
+    player.update(level, scrolling);
+    camera = player.x - W / 4;
+    level.generate(Math.floor(camera), Math.floor(camera + W + 500));
+    level.cleanup(camera);
+
+    // Boss fight
+    if (bossActive && currentBoss) {
+      if (player.x < currentBoss.arenaL + 10) player.x = currentBoss.arenaL + 10;
+      if (player.x > currentBoss.arenaR - 10) player.x = currentBoss.arenaR - 10;
+      currentBoss.update(player, level.enemyBullets);
+
+      if (currentBoss.alive) {
+        // Bullets vs boss
+        for (const b of player.bullets) {
+          if (b.alive && Math.abs(b.x - currentBoss.x) < currentBoss.w &&
+              Math.abs(b.y - (currentBoss.y - currentBoss.h/2)) < currentBoss.h) {
+            currentBoss.hit(b.damage); b.alive = false;
+            spawnParticles(b.x, b.y, '#ffaa00', 5); sfx.bossHit();
+          }
+        }
+        // Contact damage
+        if (Math.abs(player.x - currentBoss.x) < currentBoss.w * 0.7 &&
+            Math.abs(player.y - 10 - currentBoss.y + currentBoss.h/2) < currentBoss.h * 0.7)
+          player.takeDamage(3);
+      }
+
+      // Boss death
+      if (!currentBoss.alive && currentBoss.deathTimer <= 0) {
+        bossActive = false;
+        player.score += currentBoss.def.isFinal ? 2000 : 500;
+        totalScore = player.score;
+        sfx.bossDie();
+        if (currentBoss.def.isFinal) {
+          state = 'victory'; sfx.victory();
+        } else {
+          defeatedBosses.add(currentStage);
+          sfx.ability();
+          setTimeout(() => { state = 'stageselect'; }, 2000);
+        }
+        level.enemyBullets = [];
+        currentBoss = null;
+      }
+    }
+
+    // Enemies
+    for (const e of level.enemies) {
+      e.update(player.x, level.enemyBullets);
+      if (Math.abs(player.x - e.x) < 14 && Math.abs(player.y - 10 - e.y + 7) < 16)
+        player.takeDamage(2);
+    }
+
+    // Enemy bullets
+    for (const eb of level.enemyBullets) {
+      eb.update();
+      if (Math.abs(player.x - eb.x) < 10 && Math.abs(player.y - 10 - eb.y) < 10) {
+        player.takeDamage(1); eb.alive = false;
+      }
+    }
+    level.enemyBullets = level.enemyBullets.filter(b => b.alive);
+
+    // Player bullets vs enemies
+    for (const b of player.bullets) {
+      for (const e of level.enemies) {
+        if (e.alive && Math.abs(b.x - e.x) < 14 && Math.abs(b.y - e.y + 5) < 14) {
+          const killed = e.hit(b.damage); b.alive = false;
+          spawnParticles(e.x, e.y - 8, '#ffaa00', 4);
+          if (killed) { player.score += 50; sfx.enemyKill(); spawnParticles(e.x, e.y-8, '#ff4400', 10); }
+          else sfx.enemyHit();
+          break;
+        }
+      }
+    }
+
+    // Particles
+    for (const p of particles) p.update();
+    particles = particles.filter(p => p.life > 0);
+
+    // Death
+    if (!player.alive) { state = 'gameover'; music.stop(); sfx.gameOver(); }
+
+    // Draw
+    drawBG(); level.draw();
+    if (currentBoss) currentBoss.draw();
+    for (const b of player.bullets) b.draw();
+    player.draw();
+    for (const p of particles) p.draw();
+    drawHUD();
+    if (currentBoss && currentBoss.alive) currentBoss.drawHealthBar();
+    drawBossWarning();
+
+  } else if (state === 'gameover') {
+    drawBG(); level.draw(); player.draw(); drawHUD(); drawGameOver();
+    if (justPressed['KeyR']) { state = 'stageselect'; }
+    if (justPressed['KeyQ']) state = 'title';
+
+  } else if (state === 'victory') {
+    music.stop(); drawBG();
+    if (Math.random() < 0.15) {
+      const fx = W*0.2 + Math.random()*W*0.6, fy = H*0.15 + Math.random()*H*0.3;
+      const colors = ['#ffcc00','#ff4400','#00aaff','#44ff44','#ff3388'];
+      for (let i = 0; i < 12; i++) {
+        const a = Math.random() * Math.PI * 2, spd = 2 + Math.random() * 4;
+        particles.push(new Particle(fx+camera, fy, Math.cos(a)*spd, Math.sin(a)*spd, colors[Math.floor(Math.random()*colors.length)], 30+Math.random()*20));
+      }
+    }
+    for (const p of particles) p.update();
+    particles = particles.filter(p => p.life > 0);
+    for (const p of particles) p.draw();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 14px monospace';
+    ctx.fillText('VICTORY', W/2, H/2 - 25);
+    ctx.fillStyle = '#fff'; ctx.font = '5px monospace';
+    ctx.fillText('KAISER SIGMA defeated!', W/2, H/2 - 12);
+    drawSprite(W/2, H/2 + 10, 1, false);
+    ctx.fillStyle = '#aaa'; ctx.font = '5px monospace';
+    ctx.fillText(`Score: ${player.score}`, W/2, H/2 + 22);
+    ctx.fillStyle = '#fff';
+    if (Math.floor(Date.now()/500) % 2) ctx.fillText('R play again  Q title', W/2, H/2 + 40);
+    ctx.textAlign = 'left';
+    if (justPressed['KeyR']) { state = 'stageselect'; initGame(); }
+    if (justPressed['KeyQ']) state = 'title';
+  }
+
+  for (const k in justPressed) delete justPressed[k];
+
+  // Render to display
+  displayCtx.drawImage(buffer, 0, 0, SNES_W, SNES_H, 0, 0, SNES_W * SCALE, SNES_H * SCALE);
+  displayCtx.fillStyle = 'rgba(0,0,0,0.1)';
+  for (let sy = 0; sy < SNES_H * SCALE; sy += SCALE) displayCtx.fillRect(0, sy + SCALE - 1, SNES_W * SCALE, 1);
+
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
