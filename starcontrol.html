@@ -225,6 +225,11 @@ let frame = 0;
 let playerShip, enemyShip;
 let projectiles, particles, combatPlanet;
 let combatEnemy; // race key of the enemy for fleet select
+// Super Melee mode
+let meleeState; // 'pick1', 'pick2', 'fight'
+let meleeP1, meleeP2; // selected ship type keys
+let meleeCursor1, meleeCursor2;
+let titleCursor; // 0=new game, 1=continue, 2=super melee
 let starMap, nearestStar, selectedStar;
 let mapCamX, mapCamY;
 let dialogue, dialogueChoice;
@@ -2146,7 +2151,7 @@ function saveGame() {
       currentStarIdx,
       hyperX, hyperY, hyperAngle,
       inQuasiSpace, quasiX, quasiY, quasiAngle,
-      gameClock, deathMarchWarning,
+      gameClock, deathMarchWarning, mapZoom,
       starMap: starMap.map(s => ({
         ...s,
         planets: s.planets.map(p => ({
@@ -2182,6 +2187,7 @@ function loadGame() {
     quasiVX = 0; quasiVY = 0;
     gameClock = save.gameClock || 0;
     deathMarchWarning = save.deathMarchWarning || 0;
+    mapZoom = save.mapZoom || 0.2;
     starMap = save.starMap;
     mapCamX = hyperX; mapCamY = hyperY;
     selectedStar = null;
@@ -3162,6 +3168,14 @@ function updateMap() {
   mapCamX = hyperX;
   mapCamY = hyperY;
 
+  // === Map zoom controls (+ / - or PageUp/PageDown) ===
+  if (justPressed['Equal'] || justPressed['NumpadAdd'] || justPressed['PageUp']) {
+    mapZoom = Math.min(0.6, mapZoom + 0.05);
+  }
+  if (justPressed['Minus'] || justPressed['NumpadSubtract'] || justPressed['PageDown']) {
+    mapZoom = Math.max(0.08, mapZoom - 0.05);
+  }
+
   // === SC2 Game Clock / Kohr-Ah Death March ===
   gameClock++;
   const marchPct = gameClock / DEATH_MARCH_TIME;
@@ -3276,7 +3290,7 @@ function updateMap() {
   }
 }
 
-const MAP_ZOOM = 0.2; // zoomed out to see more stars
+let mapZoom = 0.2; // adjustable zoom (SC2 had zoom in/out)
 
 function returnToHyperSpace() {
   state = 'map';
@@ -3488,7 +3502,7 @@ function drawMap() {
   // === Swirling red nebula clouds (the iconic SC2 HyperSpace look) ===
   // Multiple layers of slowly moving red/crimson clouds
   const t = frame * 0.006;
-  const ox = mapCamX - W / 2 / MAP_ZOOM, oy = mapCamY - H / 2 / MAP_ZOOM;
+  const ox = mapCamX - W / 2 / mapZoom, oy = mapCamY - H / 2 / mapZoom;
   for (let layer = 0; layer < 3; layer++) {
     const parallax = 0.02 + layer * 0.01;
     const cloudAlpha = 0.06 - layer * 0.015;
@@ -3498,8 +3512,8 @@ function drawMap() {
       const seed = ci * 137.5 + layer * 47;
       const cloudBaseX = (seed * 73.1) % 2000 - 200;
       const cloudBaseY = (seed * 91.3) % 1600 - 200;
-      const cx = cloudBaseX - ox * parallax * MAP_ZOOM;
-      const cy = cloudBaseY - oy * parallax * MAP_ZOOM;
+      const cx = cloudBaseX - ox * parallax * mapZoom;
+      const cy = cloudBaseY - oy * parallax * mapZoom;
       // Wrap clouds
       const wrappedX = ((cx % (W + 200)) + W + 200) % (W + 200) - 100;
       const wrappedY = ((cy % (mapH + 200)) + mapH + 200) % (mapH + 200) - 100;
@@ -3516,8 +3530,8 @@ function drawMap() {
 
   // === Subtle red grid (SC2 had faint grid lines in HyperSpace) ===
   const gridSz = 60;
-  const gox = ((-mapCamX * MAP_ZOOM) % gridSz + gridSz) % gridSz;
-  const goy = ((-mapCamY * MAP_ZOOM) % gridSz + gridSz) % gridSz;
+  const gox = ((-mapCamX * mapZoom) % gridSz + gridSz) % gridSz;
+  const goy = ((-mapCamY * mapZoom) % gridSz + gridSz) % gridSz;
   ctx.globalAlpha = 0.12;
   ctx.strokeStyle = '#440000'; ctx.lineWidth = 1;
   for (let gx = gox; gx < W; gx += gridSz) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, mapH); ctx.stroke(); }
@@ -3568,7 +3582,7 @@ function drawMap() {
     const tb = terr[race];
     const tcx = (tb.minX + tb.maxX) / 2, tcy = (tb.minY + tb.maxY) / 2;
     const tr2 = Math.max(140, Math.hypot(tb.maxX - tb.minX, tb.maxY - tb.minY) / 2 + 100);
-    const tsx = (tcx - ox) * MAP_ZOOM, tsy = (tcy - oy) * MAP_ZOOM, tsr = tr2 * MAP_ZOOM;
+    const tsx = (tcx - ox) * mapZoom, tsy = (tcy - oy) * mapZoom, tsr = tr2 * mapZoom;
     if (tsx < -tsr - 20 || tsx > W + tsr + 20 || tsy < -tsr - 20 || tsy > mapH + tsr + 20) continue;
     const rc = SHIP_TYPES[race].color;
     // SC2: translucent colored sphere
@@ -3590,7 +3604,7 @@ function drawMap() {
   // === Stars (SC2: small bright colored dots on the red void) ===
   for (let i = 0; i < starMap.length; i++) {
     const s = starMap[i];
-    const sx = (s.x - ox) * MAP_ZOOM, sy = (s.y - oy) * MAP_ZOOM;
+    const sx = (s.x - ox) * mapZoom, sy = (s.y - oy) * mapZoom;
     if (sx < -20 || sx > W + 20 || sy < -20 || sy > mapH + 20) continue;
 
     // Star glow (subtle)
@@ -3773,7 +3787,7 @@ function drawMap() {
   // Autopilot hint
   if (selectedStar !== null) {
     ctx.fillStyle = '#334466'; ctx.font = '6px monospace';
-    ctx.fillText('A=autopilot', 218, mapH + 35 - (artifacts > 0 ? 0 : 10));
+    ctx.fillText('A=auto +/-=zoom', 218, mapH + 35 - (artifacts > 0 ? 0 : 10));
   }
 
   // Message overlay
@@ -5228,7 +5242,9 @@ function updateCombat() {
     sfx.explode();
     spawnParticles(playerShip.x, playerShip.y, '#ff4400', 12, 3);
     playerShip.alive = true; playerShip.crew = -1; // prevent re-trigger
-    if (playerShip.isAlly) {
+    if (state === 'melee' || meleeState === 'fight') {
+      // Super Melee — just let the melee handler deal with it
+    } else if (playerShip.isAlly) {
       // Ally ship destroyed — remove from fleet, pick next ship
       const idx = fleet.indexOf(playerShip.allyType);
       if (idx > -1) fleet.splice(idx, 1);
@@ -5273,21 +5289,25 @@ function updateCombat() {
     sfx.explode();
     spawnParticles(enemyShip.x, enemyShip.y, enemyShip.def.color, 12, 3);
     enemyShip.crew = -1; // prevent re-trigger
-    defeatedAliens.add(dialogue ? dialogue.starIdx : -1);
-    if (!playerShip.isAlly) crew = playerShip.crew;
-    // Check if this was the final boss
-    if (enemyShip.type === 'orz' && artifacts >= 3) {
-      setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 1000);
+    if (state === 'melee' || meleeState === 'fight') {
+      // Super Melee — handled by melee update
     } else {
-      setTimeout(() => {
-        // Return to orbit if at a star, hyperspace if random encounter
-        if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); }
-        else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
-        music.play('map');
-        gameMessage = `${enemyShip.def.race} defeated! +50 minerals`;
-        minerals += 50;
-        messageTimer = 90;
-      }, 800);
+      defeatedAliens.add(dialogue ? dialogue.starIdx : -1);
+      if (!playerShip.isAlly) crew = playerShip.crew;
+      // Check if this was the final boss
+      if (enemyShip.type === 'orz' && artifacts >= 3) {
+        setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 1000);
+      } else {
+        setTimeout(() => {
+          // Return to orbit if at a star, hyperspace if random encounter
+          if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); }
+          else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
+          music.play('map');
+          gameMessage = `${enemyShip.def.race} defeated! +50 minerals`;
+          minerals += 50;
+          messageTimer = 90;
+        }, 800);
+      }
     }
   }
 }
@@ -5745,6 +5765,154 @@ function initCombatAlly(allyType, enemyType) {
   window._combatZoom = 0.5;
 }
 
+// ==================== SUPER MELEE (SC2's iconic ship vs ship mode) ====================
+const MELEE_SHIPS = ['player','urquan','spathi','chmmr','zoqfotpik','orz','mycon','pkunk',
+  'melnorme','kohrah','yehat','supox','utwig','thraddash','ilwrath','umgah','vux',
+  'arilou','druuge','syreen','shofixti'];
+
+function updateMelee() {
+  if (meleeState === 'pick1') {
+    if (justPressed['ArrowUp'] || justPressed['KeyW']) { meleeCursor1 = (meleeCursor1 - 1 + MELEE_SHIPS.length) % MELEE_SHIPS.length; sfx.select(); }
+    if (justPressed['ArrowDown'] || justPressed['KeyS']) { meleeCursor1 = (meleeCursor1 + 1) % MELEE_SHIPS.length; sfx.select(); }
+    if (justPressed['Enter'] || justPressed['Space']) {
+      meleeP1 = MELEE_SHIPS[meleeCursor1];
+      meleeState = 'pick2';
+      sfx.confirm();
+    }
+    if (justPressed['Escape']) { state = 'title'; sfx.select(); }
+  } else if (meleeState === 'pick2') {
+    if (justPressed['ArrowUp'] || justPressed['KeyW']) { meleeCursor2 = (meleeCursor2 - 1 + MELEE_SHIPS.length) % MELEE_SHIPS.length; sfx.select(); }
+    if (justPressed['ArrowDown'] || justPressed['KeyS']) { meleeCursor2 = (meleeCursor2 + 1) % MELEE_SHIPS.length; sfx.select(); }
+    if (justPressed['Enter'] || justPressed['Space']) {
+      meleeP2 = MELEE_SHIPS[meleeCursor2];
+      meleeState = 'fight';
+      // Start melee combat
+      initCombatAlly(meleeP1, meleeP2);
+      playerShip.isAlly = false; // player controls it directly in melee
+      music.play('combat');
+      sfx.confirm();
+    }
+    if (justPressed['Escape']) { meleeState = 'pick1'; sfx.select(); }
+  } else if (meleeState === 'fight') {
+    updateCombat();
+    // Check for winner
+    if ((playerShip.crew <= 0 || enemyShip.crew <= 0) && !window._meleeEnd) {
+      window._meleeEnd = frame;
+      if (playerShip.crew <= 0) {
+        window._meleeWinner = SHIP_TYPES[meleeP2].race + ' ' + SHIP_TYPES[meleeP2].name + ' WINS!';
+      } else {
+        window._meleeWinner = SHIP_TYPES[meleeP1].race + ' ' + SHIP_TYPES[meleeP1].name + ' WINS!';
+      }
+    }
+    if (window._meleeEnd && frame - window._meleeEnd > 120) {
+      window._meleeEnd = null;
+      window._meleeWinner = null;
+      meleeState = 'pick1';
+      music.stop();
+      projectiles = []; particles = [];
+    }
+  }
+}
+
+function drawMelee() {
+  if (meleeState === 'fight') {
+    drawCombat();
+    // Winner overlay
+    if (window._meleeWinner) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(W / 2 - 110, H / 2 - 20, 220, 40);
+      ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = 2; ctx.strokeRect(W / 2 - 110, H / 2 - 20, 220, 40);
+      ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(window._meleeWinner, W / 2, H / 2 + 5);
+      ctx.textAlign = 'left';
+    }
+    return;
+  }
+
+  ctx.fillStyle = '#000011'; ctx.fillRect(0, 0, W, H);
+  drawStarField(0, 0, 40, false);
+
+  // Title
+  ctx.fillStyle = '#ff4444'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('SUPER MELEE', W / 2, 18);
+
+  const isPick2 = meleeState === 'pick2';
+  const cursor = isPick2 ? meleeCursor2 : meleeCursor1;
+  const label = isPick2 ? 'PLAYER 2 (AI)' : 'PLAYER 1';
+
+  // Player label
+  ctx.fillStyle = isPick2 ? '#ff8844' : '#44aaff';
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText(`SELECT SHIP: ${label}`, W / 2, 32);
+
+  // Already picked ship (if picking P2)
+  if (isPick2 && meleeP1) {
+    const p1Def = SHIP_TYPES[meleeP1];
+    ctx.fillStyle = '#223344'; ctx.fillRect(4, 4, 60, 26);
+    ctx.strokeStyle = '#4488ff'; ctx.strokeRect(4, 4, 60, 26);
+    ctx.fillStyle = p1Def.color; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('P1:', 8, 14);
+    ctx.fillText(p1Def.race, 8, 24);
+    ctx.textAlign = 'center';
+  }
+
+  // Ship list (two columns)
+  const cols = 2;
+  const colW = (W - 20) / cols;
+  const startY = 42;
+  const rowH = 16;
+  ctx.textAlign = 'left';
+
+  for (let i = 0; i < MELEE_SHIPS.length; i++) {
+    const shipKey = MELEE_SHIPS[i];
+    const def = SHIP_TYPES[shipKey];
+    const col = i < 11 ? 0 : 1;
+    const row = i < 11 ? i : i - 11;
+    const x = 10 + col * colW;
+    const y = startY + row * rowH;
+    const sel = i === cursor;
+
+    if (sel) {
+      ctx.fillStyle = 'rgba(34,68,136,0.4)';
+      ctx.fillRect(x - 2, y - 8, colW - 4, rowH - 2);
+      ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 1;
+      ctx.strokeRect(x - 2, y - 8, colW - 4, rowH - 2);
+    }
+
+    // Ship color dot
+    ctx.fillStyle = def.color;
+    ctx.fillRect(x, y - 5, 6, 6);
+
+    // Ship name
+    ctx.fillStyle = sel ? '#ffffff' : '#8899aa';
+    ctx.font = sel ? 'bold 8px monospace' : '7px monospace';
+    ctx.fillText(`${def.race} ${def.name}`, x + 10, y + 1);
+  }
+
+  // Selected ship preview (right side when picking)
+  const previewDef = SHIP_TYPES[MELEE_SHIPS[cursor]];
+  if (previewDef) {
+    // Ship sprite preview
+    ctx.save();
+    ctx.translate(W - 40, H - 50);
+    ctx.scale(1.5, 1.5);
+    previewDef.draw({ flash: 0, thrusting: false, def: previewDef, shieldTimer: 0 });
+    ctx.restore();
+
+    // Stats
+    ctx.fillStyle = previewDef.color; ctx.font = 'bold 8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(previewDef.race, W - 40, H - 22);
+    ctx.fillStyle = '#8899aa'; ctx.font = '6px monospace';
+    ctx.fillText(`Crew:${previewDef.maxCrew} Spd:${previewDef.maxSpeed}`, W - 40, H - 12);
+    ctx.fillText(`Spc:${previewDef.special.name}`, W - 40, H - 4);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#556677'; ctx.font = '7px monospace';
+  ctx.fillText('UP/DOWN select  ENTER pick  ESC back', W / 2, H - 2);
+  ctx.textAlign = 'left';
+}
+
 // ==================== MAIN GAME LOOP ====================
 function gameLoop() {
   try {
@@ -5753,21 +5921,27 @@ function gameLoop() {
   if (state === 'title') {
     music.play('title');
     drawTitle();
-    // Show NEW GAME / CONTINUE options
+    if (titleCursor === undefined) titleCursor = 0;
     const hasSave = localStorage.getItem('sc2_save') !== null;
+    const menuItems = ['NEW GAME', ...(hasSave ? ['CONTINUE'] : []), 'SUPER MELEE'];
+    // Menu navigation
+    if (justPressed['ArrowUp'] || justPressed['KeyW']) { titleCursor = (titleCursor - 1 + menuItems.length) % menuItems.length; sfx.select(); }
+    if (justPressed['ArrowDown'] || justPressed['KeyS']) { titleCursor = (titleCursor + 1) % menuItems.length; sfx.select(); }
+    // Draw menu
     ctx.textAlign = 'center';
-    ctx.font = 'bold 10px monospace';
-    ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#ffffff' : '#aaccff';
-    ctx.fillText('PRESS ENTER FOR NEW GAME', W / 2, H - 30);
-    if (hasSave) {
-      ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#88ffaa' : '#44cc66';
-      ctx.fillText('PRESS C TO CONTINUE', W / 2, H - 16);
+    for (let i = 0; i < menuItems.length; i++) {
+      const sel = i === titleCursor;
+      const y = H - 44 + i * 14;
+      ctx.font = sel ? 'bold 10px monospace' : '9px monospace';
+      ctx.fillStyle = sel ? (Math.floor(frame / 15) % 2 ? '#ffffff' : '#ffcc44') : '#667788';
+      ctx.fillText((sel ? '► ' : '  ') + menuItems[i], W / 2, y);
     }
     ctx.textAlign = 'left';
     if (justPressed['Enter'] || justPressed['Space']) {
-      state = 'map'; initGame(); music.play('map');
-    } else if (justPressed['KeyC'] && hasSave) {
-      if (loadGame()) { music.play('map'); }
+      const chosen = menuItems[titleCursor];
+      if (chosen === 'NEW GAME') { state = 'map'; initGame(); music.play('map'); }
+      else if (chosen === 'CONTINUE') { if (loadGame()) { music.play('map'); } }
+      else if (chosen === 'SUPER MELEE') { state = 'melee'; meleeState = 'pick1'; meleeCursor1 = 0; meleeCursor2 = 0; }
     }
   } else if (state === 'map') {
     music.play('map');
@@ -5797,6 +5971,9 @@ function gameLoop() {
   } else if (state === 'combat') {
     updateCombat();
     drawCombat();
+  } else if (state === 'melee') {
+    updateMelee();
+    drawMelee();
   } else if (state === 'gameover') {
     drawGameOver();
   } else if (state === 'victory') {
