@@ -2097,6 +2097,69 @@ function initGame() {
   selectedStar = null;
   gameMessage = null; messageTimer = 0;
   particles = [];
+  gameClock = 0; // SC2: time ticks in HyperSpace
+  deathMarchWarning = 0; // escalating warnings
+}
+
+// SC2 game time (Kohr-Ah Death March — time pressure)
+let gameClock = 0;
+let deathMarchWarning = 0;
+const DEATH_MARCH_TIME = 36000; // ~10 minutes at 60fps of HyperSpace travel
+
+function saveGame() {
+  try {
+    const save = {
+      fuel, minerals, crew, maxCrew, artifacts, modules,
+      fleet: [...fleet],
+      visitedStars: [...visitedStars],
+      defeatedAliens: [...defeatedAliens],
+      currentStarIdx,
+      hyperX, hyperY, hyperAngle,
+      inQuasiSpace, quasiX, quasiY, quasiAngle,
+      gameClock, deathMarchWarning,
+      starMap: starMap.map(s => ({
+        ...s,
+        planets: s.planets.map(p => ({
+          ...p,
+          deposits: p.deposits ? p.deposits.map(d => ({ ...d })) : [],
+        })),
+      })),
+    };
+    localStorage.setItem('sc2_save', JSON.stringify(save));
+    return true;
+  } catch (e) { console.error('Save failed:', e); return false; }
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem('sc2_save');
+    if (!raw) return false;
+    const save = JSON.parse(raw);
+    fuel = save.fuel; minerals = save.minerals;
+    crew = save.crew; maxCrew = save.maxCrew;
+    artifacts = save.artifacts; modules = save.modules;
+    fleet = save.fleet;
+    visitedStars = new Set(save.visitedStars);
+    defeatedAliens = new Set(save.defeatedAliens);
+    currentStarIdx = save.currentStarIdx;
+    hyperX = save.hyperX; hyperY = save.hyperY;
+    hyperAngle = save.hyperAngle;
+    hyperVX = 0; hyperVY = 0; hyperDest = null;
+    hyperEncounterTimer = 0;
+    inQuasiSpace = save.inQuasiSpace || false;
+    quasiX = save.quasiX || 0; quasiY = save.quasiY || 0;
+    quasiAngle = save.quasiAngle || 0;
+    quasiVX = 0; quasiVY = 0;
+    gameClock = save.gameClock || 0;
+    deathMarchWarning = save.deathMarchWarning || 0;
+    starMap = save.starMap;
+    mapCamX = hyperX; mapCamY = hyperY;
+    selectedStar = null;
+    gameMessage = 'Game loaded!'; messageTimer = 90;
+    particles = [];
+    state = 'map';
+    return true;
+  } catch (e) { console.error('Load failed:', e); return false; }
 }
 
 function getModuleStat(stat) {
@@ -3069,6 +3132,35 @@ function updateMap() {
   mapCamX = hyperX;
   mapCamY = hyperY;
 
+  // === SC2 Game Clock / Kohr-Ah Death March ===
+  gameClock++;
+  const marchPct = gameClock / DEATH_MARCH_TIME;
+  if (marchPct > 0.5 && deathMarchWarning === 0) {
+    deathMarchWarning = 1;
+    gameMessage = 'WARNING: The Kohr-Ah Death March has begun! Find the Seals!';
+    messageTimer = 180;
+  } else if (marchPct > 0.75 && deathMarchWarning === 1) {
+    deathMarchWarning = 2;
+    gameMessage = 'DANGER: Kohr-Ah are cleansing nearby star systems!';
+    messageTimer = 180;
+  } else if (marchPct > 0.9 && deathMarchWarning === 2) {
+    deathMarchWarning = 3;
+    gameMessage = 'CRITICAL: Kohr-Ah approaching Sol! Hurry!';
+    messageTimer = 180;
+  } else if (marchPct >= 1.0 && deathMarchWarning === 3) {
+    deathMarchWarning = 4;
+    // Game over — Kohr-Ah cleansed everything
+    state = 'gameover';
+    gameMessage = 'The Kohr-Ah Death March has cleansed all life...';
+    messageTimer = 300;
+    music.stop(); sfx.defeat();
+    return;
+  }
+  // Increased random encounters as Death March progresses
+  if (marchPct > 0.5 && Math.random() < 0.002 * marchPct) {
+    hyperEncounterTimer = 0; // Force encounter check
+  }
+
   // Find nearest star to player ship
   let best = null, bestD = Infinity;
   for (let i = 0; i < starMap.length; i++) {
@@ -3142,6 +3234,13 @@ function updateMap() {
       dialogue = { race: inTerritory, stage: 'greeting', text: DIALOGUES[inTerritory].greeting, starIdx: -1 };
       dialogueChoice = 0;
       gameMessage = `${SHIP_TYPES[inTerritory].race} patrol intercepts you!`;
+      messageTimer = 90;
+    } else if (!inTerritory && Math.random() < 0.08) {
+      // SC2: Melnorme traders appear in neutral/deep space
+      state = 'dialogue';
+      dialogue = { race: 'melnorme', stage: 'greeting', text: DIALOGUES.melnorme.greeting, starIdx: -1 };
+      dialogueChoice = 0;
+      gameMessage = 'A Melnorme trader approaches!';
       messageTimer = 90;
     }
   }
@@ -3584,6 +3683,19 @@ function drawMap() {
   // === RIGHT: Star info & artifacts ===
   ctx.fillStyle = '#223366'; ctx.fillRect(210, mapH + 5, 1, hudH - 8);
 
+  // SC2 Game Date (starts FEB 2155)
+  const gameMonths = Math.floor(gameClock / 3600); // ~1 month per minute
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const startMonth = 1; // FEB
+  const dateMonth = months[(startMonth + gameMonths) % 12];
+  const dateYear = 2155 + Math.floor((startMonth + gameMonths) / 12);
+  // Death March warning color
+  const marchPctHud = gameClock / DEATH_MARCH_TIME;
+  ctx.fillStyle = marchPctHud > 0.75 ? (Math.floor(frame / 10) % 2 ? '#ff2222' : '#ff8844') :
+    marchPctHud > 0.5 ? '#ff8844' : '#6688bb';
+  ctx.font = '7px monospace';
+  ctx.fillText(`${dateMonth} ${dateYear}`, 285, mapH + 35);
+
   // Artifacts/seals
   ctx.fillStyle = '#8888aa'; ctx.fillText('SEALS', 218, mapH + 35);
   ctx.fillStyle = '#ffcc44';
@@ -3816,7 +3928,7 @@ function getHayesMsg() {
 }
 
 function updateStarbase() {
-  const options = 5; // Talk, Refuel, Crew, Upgrade, Depart
+  const options = 7; // Talk, Refuel, Crew, Upgrade, Save, Load, Depart
   if (justPressed['ArrowUp'] || justPressed['KeyW']) { starbaseCursor = (starbaseCursor - 1 + options) % options; sfx.select(); }
   if (justPressed['ArrowDown'] || justPressed['KeyS']) { starbaseCursor = (starbaseCursor + 1) % options; sfx.select(); }
 
@@ -3877,7 +3989,28 @@ function updateStarbase() {
       state = 'upgrade';
       upgradeCursor = 0;
     } else if (starbaseCursor === 4) {
-      // Depart
+      // Save game
+      if (saveGame()) {
+        starbaseMsg = 'Game saved!';
+        starbaseMsgTimer = 90;
+        sfx.confirm();
+      } else {
+        starbaseMsg = 'Save failed!';
+        starbaseMsgTimer = 60;
+        sfx.alarm();
+      }
+    } else if (starbaseCursor === 5) {
+      // Load game
+      if (loadGame()) {
+        sfx.confirm();
+      } else {
+        starbaseMsg = 'No saved game found.';
+        starbaseMsgTimer = 60;
+        sfx.alarm();
+      }
+    } else if (starbaseCursor === 6) {
+      // Depart (auto-save on departure)
+      saveGame();
       returnToHyperSpace();
       sfx.warp();
     }
@@ -4013,6 +4146,8 @@ function drawStarbase() {
     `REFUEL (1 RU = 5 fuel) [${fuel}/200]`,
     `RECRUIT CREW (10 RU) [${crew}/${maxCrew}]`,
     `OUTFIT MODULES [${modules.length}/${MAX_MODULES}]`,
+    'SAVE GAME',
+    'LOAD GAME',
     'DEPART STARBASE',
   ];
 
@@ -4186,7 +4321,13 @@ function drawOrbit() {
       ctx.globalAlpha = 1;
     }
     // Planet body
-    ctx.fillStyle = p.color;
+    if (p.type === 'Rainbow') {
+      // Rainbow world: cycling hue
+      const hue = (frame * 2 + i * 60) % 360;
+      ctx.fillStyle = `hsl(${hue}, 80%, 50%)`;
+    } else {
+      ctx.fillStyle = p.color;
+    }
     ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill();
     // Surface detail
     ctx.save(); ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.clip();
@@ -4226,10 +4367,11 @@ function drawOrbit() {
   // Planet close-up (large rotating planet)
   const ppx = panX + panW2/2, ppy = panY + 50, ppr = 36;
   // Atmosphere
-  ctx.globalAlpha = 0.1; ctx.fillStyle = p.color;
+  const closeUpColor = p.type === 'Rainbow' ? `hsl(${(frame * 2) % 360}, 80%, 50%)` : p.color;
+  ctx.globalAlpha = 0.1; ctx.fillStyle = closeUpColor;
   ctx.beginPath(); ctx.arc(ppx, ppy, ppr + 4, 0, TAU); ctx.fill();
   ctx.globalAlpha = 1;
-  ctx.fillStyle = p.color;
+  ctx.fillStyle = closeUpColor;
   ctx.beginPath(); ctx.arc(ppx, ppy, ppr, 0, TAU); ctx.fill();
   // Rotating surface features
   ctx.save(); ctx.beginPath(); ctx.arc(ppx, ppy, ppr, 0, TAU); ctx.clip();
@@ -4270,6 +4412,22 @@ function drawOrbit() {
     const hazLevels = ['None', 'Low', 'Medium', 'High'];
     const hazColors = ['#44ff44', '#ffcc44', '#ff8844', '#ff4444'];
     ctx.fillStyle = hazColors[p.hazard || 0]; ctx.fillText(hazLevels[p.hazard || 0], panX + 48, ppy + ppr + 78);
+
+    // SC2 mineral type breakdown (colored dots)
+    const mineralCounts = {};
+    for (const d of p.deposits.filter(d => !d.collected)) {
+      mineralCounts[d.type] = (mineralCounts[d.type] || 0) + 1;
+    }
+    let mRowY = ppy + ppr + 90;
+    for (const typeIdx in mineralCounts) {
+      const mt = MINERAL_TYPES[typeIdx];
+      ctx.fillStyle = mt.color;
+      ctx.fillRect(panX + 6, mRowY - 4, 5, 5);
+      ctx.fillStyle = '#8899aa'; ctx.font = '6px monospace';
+      ctx.fillText(`${mt.name} x${mineralCounts[typeIdx]}`, panX + 14, mRowY);
+      mRowY += 9;
+      if (mRowY > panH2 - 30) break;
+    }
   } else {
     ctx.fillStyle = '#6688aa'; ctx.fillText('HOLD SPACE', panX + 6, ppy + ppr + 42);
     ctx.fillStyle = '#6688aa'; ctx.fillText('to scan', panX + 6, ppy + ppr + 54);
@@ -5310,8 +5468,13 @@ function drawGameOver() {
   ctx.fillStyle = '#ff0000'; ctx.font = 'bold 20px monospace';
   ctx.fillText('GAME OVER', W/2, H/2 - 18);
   ctx.fillStyle = '#cc8888'; ctx.font = '8px monospace';
-  ctx.fillText('The Vindicator is lost.', W/2, H/2);
-  ctx.fillText('The dimensional rift grows wider...', W/2, H/2 + 12);
+  if (deathMarchWarning >= 4) {
+    ctx.fillText('The Kohr-Ah Death March', W/2, H/2 - 4);
+    ctx.fillText('has cleansed all life in the galaxy.', W/2, H/2 + 8);
+  } else {
+    ctx.fillText('The Vindicator is lost.', W/2, H/2);
+    ctx.fillText('The dimensional rift grows wider...', W/2, H/2 + 12);
+  }
   ctx.fillStyle = '#ffcc44'; ctx.fillText(`Precursor Seals: ${artifacts}/3`, W/2, H/2 + 28);
   ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace';
   if (Math.floor(Date.now()/500)%2) ctx.fillText('PRESS ANY KEY', W/2, H/2 + 55);
@@ -5385,10 +5548,16 @@ function drawVictory() {
   ctx.fillText('Yehat, and Syreen stand', W/2, 224);
   ctx.fillText('united among the stars.', W/2, 236);
 
+  // Fleet/stats summary
+  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, 243, 120, 1);
+  ctx.fillStyle = '#aabb88'; ctx.font = '7px monospace';
+  ctx.fillText(`Fleet: ${fleet.length} ships | Minerals: ${minerals} RU`, W/2, 256);
+  ctx.fillText(`Stars visited: ${visitedStars.size} | Modules: ${modules.length}`, W/2, 268);
+
   ctx.fillStyle = '#667788'; ctx.font = '8px monospace';
-  ctx.fillText('But somewhere in the void,', W/2, 260);
+  ctx.fillText('But somewhere in the void,', W/2, 288);
   ctx.fillStyle = '#44aa88';
-  ctx.fillText('the Orz are still *smiling*...', W/2, 272);
+  ctx.fillText('the Orz are still *smiling*...', W/2, 300);
 
   // Blinking prompt
   ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace';
@@ -5519,8 +5688,21 @@ function gameLoop() {
   if (state === 'title') {
     music.play('title');
     drawTitle();
-    for (const k in justPressed) {
-      if (justPressed[k]) { state = 'map'; initGame(); music.play('map'); break; }
+    // Show NEW GAME / CONTINUE options
+    const hasSave = localStorage.getItem('sc2_save') !== null;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#ffffff' : '#aaccff';
+    ctx.fillText('PRESS ENTER FOR NEW GAME', W / 2, H - 30);
+    if (hasSave) {
+      ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#88ffaa' : '#44cc66';
+      ctx.fillText('PRESS C TO CONTINUE', W / 2, H - 16);
+    }
+    ctx.textAlign = 'left';
+    if (justPressed['Enter'] || justPressed['Space']) {
+      state = 'map'; initGame(); music.play('map');
+    } else if (justPressed['KeyC'] && hasSave) {
+      if (loadGame()) { music.play('map'); }
     }
   } else if (state === 'map') {
     music.play('map');
