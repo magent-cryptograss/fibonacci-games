@@ -905,7 +905,7 @@ const SHIP_TYPES = {
     turnSpeed: 0.05, thrust: 0.2, maxSpeed: 4, drag: 0.996,
     maxCrew: 50, maxEnergy: 150, energyRegen: 0.3,
     weapon: { type: 'homing', damage: 3, speed: 5, rate: 20, cost: 12, color: '#cc66ff', size: 3 },
-    special: { name: 'Teleport', cost: 40, duration: 1 },
+    special: { name: 'Marines', cost: 25, duration: 1 },
     draw(ship) {
       const f = ship.flash > 0;
       // === Orz Nemesis - angular marine/fish hull with rotating turret ===
@@ -1291,7 +1291,7 @@ const SHIP_TYPES = {
     color: '#662288', accent: '#884488', dark: '#331144',
     turnSpeed: 0.06, thrust: 0.2, maxSpeed: 4.5, drag: 0.995,
     maxCrew: 22, maxEnergy: 80, energyRegen: 0.5,
-    weapon: { type: 'laser', damage: 2, speed: 5, rate: 4, cost: 2, color: '#ff4488', size: 4 },
+    weapon: { type: 'cone', damage: 1, speed: 4, rate: 3, cost: 1, color: '#ff4488', size: 4 },
     special: { name: 'Cloak', cost: 20, duration: 120 },
     draw(ship) {
       const f = ship.flash > 0;
@@ -1329,7 +1329,7 @@ const SHIP_TYPES = {
     color: '#dd8899', accent: '#ffaabb', dark: '#aa5566',
     turnSpeed: 0.05, thrust: 0.18, maxSpeed: 4, drag: 0.995,
     maxCrew: 18, maxEnergy: 80, energyRegen: 0.5,
-    weapon: { type: 'beam', damage: 2, speed: 6, rate: 6, cost: 3, color: '#ff88cc', size: 4 },
+    weapon: { type: 'cone', damage: 2, speed: 3, rate: 4, cost: 2, color: '#ff88cc', size: 5 },
     special: { name: 'Reverse', cost: 8, duration: 1 },
     draw(ship) {
       const f = ship.flash > 0;
@@ -1407,7 +1407,7 @@ const SHIP_TYPES = {
     color: '#88bbff', accent: '#aaddff', dark: '#4477cc',
     turnSpeed: 0.12, thrust: 0.4, maxSpeed: 8, drag: 0.99,
     maxCrew: 6, maxEnergy: 60, energyRegen: 0.8,
-    weapon: { type: 'laser', damage: 1, speed: 12, rate: 4, cost: 2, color: '#aaddff', size: 2 },
+    weapon: { type: 'autoaim', damage: 1, speed: 12, rate: 4, cost: 2, color: '#aaddff', size: 2 },
     special: { name: 'Teleport', cost: 15, duration: 1 },
     draw(ship) {
       const f = ship.flash > 0;
@@ -1686,6 +1686,19 @@ class Ship {
     } else if (w.type === 'homing') {
       const target = this.isPlayer ? enemyShip : playerShip;
       projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed, vy: ny*w.speed, damage: w.damage, owner: this, color: w.color, size: w.size, life: 80, homing: true, target });
+    } else if (w.type === 'autoaim') {
+      // SC2 Arilou auto-aim laser — tracks nearest enemy
+      const target = this.isPlayer ? enemyShip : playerShip;
+      const aimAngle = Math.atan2(target.y - this.y, target.x - this.x);
+      const ax = Math.cos(aimAngle), ay = Math.sin(aimAngle);
+      projectiles.push({ x: this.x + ax*10, y: this.y + ay*10, vx: ax*w.speed, vy: ay*w.speed, damage: w.damage, owner: this, color: w.color, size: w.size, life: 25, isBeam: true });
+      sfx.laser();
+    } else if (w.type === 'cone') {
+      // SC2 Umgah antimatter cone — short range, wide spread
+      for (let ci = -2; ci <= 2; ci++) {
+        const a = this.angle - Math.PI/2 + ci * 0.25;
+        projectiles.push({ x: this.x + nx*6, y: this.y + ny*6, vx: Math.cos(a)*w.speed, vy: Math.sin(a)*w.speed, damage: w.damage, owner: this, color: w.color, size: w.size, life: 12, isCone: true });
+      }
     } else if (w.type === 'beam') {
       // SC2-style beam weapon — longer range, faster projectile, beam visual
       projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed*1.2 + this.vx*0.2, vy: ny*w.speed*1.2 + this.vy*0.2, damage: w.damage, owner: this, color: w.color, size: w.size, life: 35, isBeam: true, sx: this.x + nx*10, sy: this.y + ny*10 });
@@ -1694,6 +1707,12 @@ class Ship {
       projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed + this.vx*0.3, vy: ny*w.speed + this.vy*0.3, damage: w.damage, owner: this, color: w.color, size: w.size, life: 50 });
     }
     if (w.type !== 'beam') sfx.shoot();
+    // SC2 Druuge Mauler: massive cannon recoil pushes ship backward
+    if (this.def.name === 'Mauler') {
+      this.vx -= nx * 6;
+      this.vy -= ny * 6;
+      screenShake = 3;
+    }
   }
   useSpecial() {
     if (this.specialCooldown > 0 || this.energy < this.def.special.cost) return;
@@ -1742,6 +1761,25 @@ class Ship {
       this.drones.push({ x: this.x, y: this.y, angle: Math.random() * TAU, life: 300 });
       this.specialCooldown = 60;
       sfx.confirm();
+    } else if (sp.name === 'Marines') {
+      // SC2 Orz "Go! Go!" — launches space marines that board enemy ship and kill crew
+      const target = this.isPlayer ? enemyShip : playerShip;
+      const a = Math.atan2(target.y - this.y, target.x - this.x);
+      // Launch 2 marines as homing projectiles that damage crew on impact
+      for (let mi = 0; mi < 2; mi++) {
+        projectiles.push({
+          x: this.x, y: this.y,
+          vx: Math.cos(a + (mi - 0.5) * 0.3) * 4,
+          vy: Math.sin(a + (mi - 0.5) * 0.3) * 4,
+          damage: 3, owner: this, color: '#55eebb', size: 3, life: 120,
+          homing: true, target, isMarine: true
+        });
+      }
+      this.specialCooldown = 60;
+      spawnParticles(this.x, this.y, '#55eebb', 6, 2);
+      gameMessage = 'Orz: Go! Go!';
+      messageTimer = 30;
+      sfx.launch();
     } else if (sp.name === 'Teleport') {
       spawnParticles(this.x, this.y, '#cc66ff', 15, 3);
       this.x = (Math.random() - 0.5) * 600;
@@ -1836,14 +1874,28 @@ class Ship {
       this.specialCooldown = 20;
       sfx.shoot();
     } else if (sp.name === 'Siren') {
-      // Syreen siren song - steal crew from enemy
+      // SC2 Syreen Siren Song — crew dots fly from enemy to Syreen
       const target = this.isPlayer ? enemyShip : playerShip;
       if (target.crew > 1) {
-        const stolen = Math.min(2, target.crew - 1);
+        const stolen = Math.min(3, target.crew - 1);
         target.crew -= stolen;
         this.crew = Math.min(this.def.maxCrew, this.crew + stolen);
-        spawnParticles(target.x, target.y, '#ff88cc', 8, 2);
-        spawnParticles(this.x, this.y, '#88ccff', 6, 2);
+        // Crew dots flying from enemy to us
+        for (let ci = 0; ci < stolen; ci++) {
+          const a = Math.random() * TAU;
+          particles.push(new Particle(
+            target.x + Math.cos(a) * 10, target.y + Math.sin(a) * 10,
+            (this.x - target.x) * 0.03 + (Math.random() - 0.5) * 2,
+            (this.y - target.y) * 0.03 + (Math.random() - 0.5) * 2,
+            '#88ff88', 30, 'glow'));
+        }
+        // Pink song wave around Syreen
+        for (let wi = 0; wi < 12; wi++) {
+          const wa = (wi / 12) * TAU;
+          particles.push(new Particle(this.x, this.y, Math.cos(wa) * 3, Math.sin(wa) * 3, '#ff88cc', 20, 'spark'));
+        }
+        gameMessage = `Siren Song! Stole ${stolen} crew!`;
+        messageTimer = 40;
       }
       this.specialCooldown = 120;
       sfx.shield();
@@ -1863,14 +1915,19 @@ class Ship {
   }
   takeDamage(dmg) {
     if (this.shieldTimer > 0) {
-      // SC2 Yehat-style: shield absorbs hit but costs energy per damage absorbed
       if (this.def.special && this.def.special.name === 'Shield') {
+        // SC2 Yehat: shield absorbs hit but costs energy
         this.energy = Math.max(0, this.energy - dmg * 4);
-        if (this.energy <= 0) this.shieldTimer = 0; // shield drops when energy depleted
+        if (this.energy <= 0) this.shieldTimer = 0;
+        spawnParticles(this.x, this.y, '#4488ff', 4, 2);
+      } else if (this.def.special && this.def.special.name === 'Absorb') {
+        // SC2 Utwig: absorb shield GAINS energy from incoming fire!
+        this.energy = Math.min(this.def.maxEnergy, this.energy + dmg * 5);
+        spawnParticles(this.x, this.y, '#ffcc44', 6, 2);
       } else {
         this.shieldTimer = Math.max(0, this.shieldTimer - 10);
+        spawnParticles(this.x, this.y, '#4488ff', 4, 2);
       }
-      spawnParticles(this.x, this.y, '#4488ff', 4, 2);
       sfx.hit();
       return;
     }
@@ -1973,6 +2030,7 @@ function updateAI(ship, target) {
   if (ship.energy > ship.def.special.cost && ship.specialCooldown <= 0) {
     if (ship.def.special.name === 'Fighters' && d < 200) ship.useSpecial();
     else if (ship.def.special.name === 'Teleport' && d < 50) ship.useSpecial();
+    else if (ship.def.special.name === 'Marines' && d < 180) ship.useSpecial();
     else if (ship.def.special.name === 'Regenerate' && ship.crew < ship.def.maxCrew * 0.5) ship.useSpecial();
     else if (ship.def.special.name === 'Drone' && ship.drones.length < 3) ship.useSpecial();
     else if (ship.def.special.name === 'Confusion' && d < 150) ship.useSpecial();
@@ -2249,9 +2307,12 @@ const DIALOGUES = {
     friendly: 'A repeat customer! We offer loyalty discounts of exactly zero percent! But we DO appreciate your business!',
     hostile: 'Attacking a Melnorme vessel is extremely bad for your credit rating.',
     choices: [
-      { text: 'What information do you have?', response: 'For 15 minerals, I can tell you this: the dimensional rift was caused by the Sa-Matra detonation. Three Precursor Seals can close it. The Orz do not want it closed. This information is NOW free. You are welcome!', action: 'trade', cost: 15 },
-      { text: 'Can we buy fuel?', response: 'Of course! 10 minerals for 30 units of HyperSpace fuel! The Druuge charge MUCH more, and they want your crew! We are MUCH more ethical!', action: 'swtrade', cost: 10, give: 30 },
-      { text: 'Tell us about the Orz.', response: 'The Orz are... projections. Fingers of a larger entity pushing through from another dimension. The Androsynth found this out the hard way. They are ALL gone now. Do not *pull* too hard.', action: 'info' },
+      { text: 'Buy fuel (10 RU = 30 fuel)', response: 'Of course! 10 minerals for 30 units of HyperSpace fuel! The Druuge charge MUCH more, and they want your crew! We are MUCH more ethical!', action: 'swtrade', cost: 10, give: 30 },
+      { text: 'Buy tech upgrade (50 RU)', response: 'Excellent taste! We have enhanced your ship\'s energy recharge systems. Your battery will now regenerate 25% faster. The Melnorme guarantee ALL our products!', action: 'techupgrade', cost: 50 },
+      { text: 'Buy star locations (20 RU)', response: 'A wise investment! We have uploaded the locations of several mineral-rich Rainbow worlds to your star charts. These worlds contain extraordinary mineral deposits. Happy mining!', action: 'starlocs', cost: 20 },
+      { text: 'Sell bio-data (3 RU each)', response: 'Biological data is our PASSION! We have catalogued your specimens and added them to our grand xenobiological database. Payment has been credited to your account!', action: 'sellbio' },
+      { text: 'Tell us about the Orz.', response: 'The Orz are... projections. Fingers of a larger entity pushing through from another dimension. The Androsynth found this out the hard way. They are ALL gone now. Do not *pull* too hard. The Precursor Seals are your only hope of sealing the rift they came through.', action: 'info' },
+      { text: 'What is Precursor history?', response: 'Ah, the Precursors! For this information we normally charge MUCH more. But the rift threatens our profits, so: The Precursors were an ancient race who built the dimensional barriers between realities. When they vanished, they left three Seals to maintain the barriers. The Sa-Matra\'s explosion cracked one barrier. Find the Seals before the Orz break through completely!', action: 'info' },
     ],
   },
   kohrah: {
@@ -4272,7 +4333,7 @@ function getHayesMsg() {
 }
 
 function updateStarbase() {
-  const options = 7; // Talk, Refuel, Crew, Upgrade, Save, Load, Depart
+  const options = 8; // Talk, Refuel, Crew, Fleet Crew, Upgrade, Save, Load, Depart
   if (justPressed['ArrowUp'] || justPressed['KeyW']) { starbaseCursor = (starbaseCursor - 1 + options) % options; sfx.select(); }
   if (justPressed['ArrowDown'] || justPressed['KeyS']) { starbaseCursor = (starbaseCursor + 1) % options; sfx.select(); }
 
@@ -4329,10 +4390,41 @@ function updateStarbase() {
         sfx.alarm();
       }
     } else if (starbaseCursor === 3) {
+      // SC2 Crew Transfer — distribute crew to fleet ships
+      if (fleet.length <= 1) {
+        starbaseMsg = 'No allied ships in fleet to transfer crew to.';
+        starbaseMsgTimer = 90;
+      } else {
+        // Cycle through fleet ships and top up their crew
+        let transferred = 0;
+        for (const shipType of fleet) {
+          if (shipType === 'player') continue;
+          const def = SHIP_TYPES[shipType];
+          if (!def) continue;
+          // Each fleet ship can hold its maxCrew
+          // We track fleet crew in a map
+          if (!window._fleetCrew) window._fleetCrew = {};
+          const current = window._fleetCrew[shipType] || def.maxCrew;
+          if (current < def.maxCrew && crew > 1) {
+            const need = Math.min(def.maxCrew - current, crew - 1, 3);
+            window._fleetCrew[shipType] = current + need;
+            crew -= need;
+            transferred += need;
+          }
+        }
+        if (transferred > 0) {
+          starbaseMsg = `Transferred ${transferred} crew to fleet ships.`;
+          sfx.confirm();
+        } else {
+          starbaseMsg = 'All fleet ships are fully crewed.';
+        }
+        starbaseMsgTimer = 90;
+      }
+    } else if (starbaseCursor === 4) {
       // Upgrades
       state = 'upgrade';
       upgradeCursor = 0;
-    } else if (starbaseCursor === 4) {
+    } else if (starbaseCursor === 5) {
       // Save game
       if (saveGame()) {
         starbaseMsg = 'Game saved!';
@@ -4343,7 +4435,7 @@ function updateStarbase() {
         starbaseMsgTimer = 60;
         sfx.alarm();
       }
-    } else if (starbaseCursor === 5) {
+    } else if (starbaseCursor === 6) {
       // Load game
       if (loadGame()) {
         sfx.confirm();
@@ -4352,7 +4444,7 @@ function updateStarbase() {
         starbaseMsgTimer = 60;
         sfx.alarm();
       }
-    } else if (starbaseCursor === 6) {
+    } else if (starbaseCursor === 7) {
       // Depart (auto-save on departure)
       saveGame();
       returnToHyperSpace();
@@ -4489,6 +4581,7 @@ function drawStarbase() {
     'TALK TO COMMANDER',
     `REFUEL (1 RU = 5 fuel) [${fuel}/200]`,
     `RECRUIT CREW (10 RU) [${crew}/${maxCrew}]`,
+    `FLEET CREW TRANSFER [${fleet.length} ships]`,
     `OUTFIT MODULES [${modules.length}/${MAX_MODULES}]`,
     'SAVE GAME',
     'LOAD GAME',
@@ -4916,6 +5009,62 @@ function updateDialogue() {
           messageTimer = 60;
         }
         returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'techupgrade') {
+        // Melnorme tech upgrade — buy permanent ship enhancements
+        if (minerals >= (dialogue.cost || 50)) {
+          minerals -= dialogue.cost || 50;
+          // Cycle through tech upgrades
+          if (!window._melnormeTech) window._melnormeTech = 0;
+          const techs = ['recharge', 'thrust', 'turn', 'weapon'];
+          const tech = techs[window._melnormeTech % techs.length];
+          window._melnormeTech++;
+          if (tech === 'recharge') { SHIP_TYPES.player.energyRegen *= 1.25; gameMessage = 'Tech upgrade: Energy recharge +25%!'; }
+          else if (tech === 'thrust') { SHIP_TYPES.player.thrust += 0.05; gameMessage = 'Tech upgrade: Thrust power increased!'; }
+          else if (tech === 'turn') { SHIP_TYPES.player.turnSpeed += 0.01; gameMessage = 'Tech upgrade: Turn speed increased!'; }
+          else { SHIP_TYPES.player.weapon.damage += 1; gameMessage = 'Tech upgrade: Weapon damage +1!'; }
+          messageTimer = 120;
+          sfx.victory();
+        } else {
+          gameMessage = 'Not enough minerals for tech upgrade!';
+          messageTimer = 60;
+        }
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'starlocs') {
+        // Melnorme reveals Rainbow world locations
+        if (minerals >= (dialogue.cost || 20)) {
+          minerals -= dialogue.cost || 20;
+          // Mark some unvisited stars as revealed
+          let revealed = 0;
+          for (const s of starMap) {
+            if (!s.visited && s.planets.some(p => p.type === 'Rainbow') && revealed < 3) {
+              s.visited = true; // show on map
+              revealed++;
+            }
+          }
+          gameMessage = revealed > 0 ? `Revealed ${revealed} Rainbow world locations!` : 'No new locations to reveal!';
+          messageTimer = 120;
+          sfx.scan();
+        } else {
+          gameMessage = 'Not enough minerals!';
+          messageTimer = 60;
+        }
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'sellbio') {
+        // Sell bio-data for minerals
+        // Count bio-data collected (tracked as a counter)
+        if (!window._bioData) window._bioData = 0;
+        if (window._bioData > 0) {
+          const payment = window._bioData * 3;
+          minerals += payment;
+          gameMessage = `Sold ${window._bioData} bio-data for ${payment} RU!`;
+          window._bioData = 0;
+          messageTimer = 90;
+          sfx.pickup();
+        } else {
+          gameMessage = 'No bio-data to sell! Collect specimens on planet surfaces.';
+          messageTimer = 90;
+        }
+        returnAfterDialogue(); sfx.confirm();
       } else if (act === 'heal') {
         crew = Math.min(maxCrew, crew + 10);
         defeatedAliens.add(dialogue.starIdx);
@@ -5305,7 +5454,7 @@ function updateLander() {
     let totalMinerals = 0;
     let bioData = 0;
     for (const c of landerCargo) {
-      if (c === -1) { bioData++; minerals += 3; totalMinerals += 3; }
+      if (c === -1) { bioData++; minerals += 3; totalMinerals += 3; if (!window._bioData) window._bioData = 0; window._bioData++; }
       else { const val = MINERAL_TYPES[c].value; minerals += val; totalMinerals += val; }
     }
     if (landerHP <= 0) {
@@ -5920,6 +6069,13 @@ function drawCombat() {
       ctx.fillStyle = '#ffaa22';
       ctx.beginPath(); ctx.arc(sx, sy, p.size * 0.6, 0, TAU); ctx.fill();
       ctx.globalAlpha = 1;
+    } else if (p.isMarine) {
+      // Orz space marine — small humanoid figure
+      ctx.fillStyle = '#55eebb';
+      ctx.fillRect(sx - 1, sy - 3, 2, 4); // body
+      ctx.fillRect(sx - 3, sy - 1, 6, 2); // arms
+      ctx.fillStyle = '#aaffdd';
+      ctx.fillRect(sx - 1, sy - 4, 2, 2); // head
     } else if (p.homing) {
       // Spathi BUTT torpedo: glowing seeker
       ctx.fillStyle = '#ff8800';
@@ -5930,6 +6086,16 @@ function drawCombat() {
       ctx.globalAlpha = 0.25;
       ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - p.vx * 2, sy - p.vy * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (p.isCone) {
+      // Umgah antimatter cone — glowing expanding blob
+      const frac = p.life / 12;
+      ctx.globalAlpha = frac * 0.7;
+      ctx.fillStyle = p.color;
+      const r = p.size * (1.5 - frac * 0.5);
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.globalAlpha = frac * 0.4;
+      ctx.beginPath(); ctx.arc(sx, sy, r * 0.4, 0, TAU); ctx.fill();
       ctx.globalAlpha = 1;
     } else if (p.isBeam) {
       // SC2-style beam weapon: glowing line from source to current position
