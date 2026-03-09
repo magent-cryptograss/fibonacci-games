@@ -290,6 +290,7 @@ let landerX, landerY, landerVX, landerVY, landerAngle, landerFuel;
 let landerCargo, landerMaxCargo, landerHP, landerMaxHP;
 let surfaceDeposits; // array of {x, y, type, collected}
 let surfaceHazards; // array of {x, y, type, timer}
+let surfaceArtifacts; // rare Precursor artifacts on surfaces
 let surfaceBio; // array of {x, y, type, alive, vx, vy}
 let surfaceWidth, surfaceHeight;
 let surfaceTerrain; // height map array
@@ -4664,6 +4665,21 @@ function drawDialogue() {
   ctx.scale(pScale, pScale);
   drawAlienPortrait(dialogue.race, 0, 0);
   ctx.restore();
+  // SC2 comm screen scanlines (CRT effect on portrait)
+  ctx.globalAlpha = 0.08;
+  for (let sl = 0; sl < portH; sl += 2) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, sl, portW, 1);
+  }
+  ctx.globalAlpha = 1;
+  // SC2 comm static flicker (occasional)
+  if (Math.random() < 0.03) {
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = '#ffffff';
+    const staticY = Math.random() * portH;
+    ctx.fillRect(0, staticY, portW, 2);
+    ctx.globalAlpha = 1;
+  }
   // SC2 comm border — double line in race color
   ctx.strokeStyle = raceColor; ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, portW - 2, portH - 2);
@@ -4797,6 +4813,23 @@ function initLander(planetIdx) {
       vx: (Math.random() - 0.5) * 1.5, vy: 0,
     });
   }
+  // Precursor artifacts (rare finds on planet surfaces — SC2 had various artifacts)
+  surfaceArtifacts = [];
+  if (Math.random() < 0.08) { // ~8% chance per planet
+    const artifactTypes = [
+      { name: 'Precursor Data Core', bonus: 'minerals', value: 50, color: '#ffcc44' },
+      { name: 'Ancient Power Cell', bonus: 'fuel', value: 30, color: '#44ffaa' },
+      { name: 'Alien Lifeform', bonus: 'bio', value: 20, color: '#ff88cc' },
+      { name: 'Warp Field Amplifier', bonus: 'minerals', value: 100, color: '#cc88ff' },
+    ];
+    const art = artifactTypes[Math.floor(Math.random() * artifactTypes.length)];
+    const ax = 50 + Math.random() * (surfaceWidth - 100);
+    surfaceArtifacts.push({
+      ...art, x: ax,
+      y: surfaceHeight - surfaceTerrain[Math.floor(ax)] - 4,
+      collected: false,
+    });
+  }
   // Hazard timers
   surfaceHazards = [];
   // Lander state
@@ -4871,6 +4904,21 @@ function updateLander() {
         bio.alive = false;
         landerCargo.push(-1); // -1 = bio data
         sfx.pickup();
+      }
+    }
+  }
+
+  // Collect Precursor artifacts
+  if (surfaceArtifacts) {
+    for (const art of surfaceArtifacts) {
+      if (!art.collected && Math.abs(landerX - art.x) < 10 && Math.abs(landerY - art.y) < 10) {
+        art.collected = true;
+        if (art.bonus === 'minerals') minerals += art.value;
+        else if (art.bonus === 'fuel') fuel = Math.min(200, fuel + art.value);
+        else if (art.bonus === 'bio') minerals += art.value;
+        gameMessage = `ARTIFACT: ${art.name}! +${art.value} ${art.bonus}`;
+        messageTimer = 120;
+        sfx.victory();
       }
     }
   }
@@ -5017,6 +5065,27 @@ function drawLander() {
     ctx.fillRect(bx + 2, bio.y + 1, 1, 2);
   }
 
+  // Precursor artifacts (glowing, pulsing items)
+  if (surfaceArtifacts) {
+    for (const art of surfaceArtifacts) {
+      if (art.collected) continue;
+      const ax = art.x - camX;
+      if (ax < -10 || ax > W + 10) continue;
+      // Pulsing glow
+      ctx.globalAlpha = 0.3 + Math.sin(frame * 0.1) * 0.15;
+      ctx.fillStyle = art.color;
+      ctx.beginPath(); ctx.arc(ax, art.y, 8, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = art.color;
+      ctx.fillRect(ax - 3, art.y - 3, 6, 6);
+      // Star sparkle
+      ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.6 + Math.sin(frame * 0.15) * 0.3;
+      ctx.fillRect(ax - 1, art.y - 5, 2, 10);
+      ctx.fillRect(ax - 5, art.y - 1, 10, 2);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // Hazards
   for (const h of surfaceHazards) {
     const hx = h.x - camX;
@@ -5140,6 +5209,37 @@ function updateCombat() {
   if (keys['ArrowUp'] || keys['KeyW']) playerShip.thrustForward();
   if (keys['KeyZ']) playerShip.fire();
   if (justPressed['KeyX']) playerShip.useSpecial();
+
+  // Emergency warp escape (SC2: you could flee combat)
+  if (justPressed['Escape'] && state !== 'melee' && meleeState !== 'fight') {
+    sfx.warp();
+    fuel = Math.max(0, fuel - 5); // costs 5 fuel to emergency warp
+    if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); }
+    else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
+    music.play('map');
+    gameMessage = 'Emergency warp! (-5 fuel)';
+    messageTimer = 90;
+    return;
+  }
+
+  // Point defense system — auto-destroy nearby enemy projectiles
+  if (playerShip.hasPointDef && frame % 8 === 0) {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      if (p.owner !== playerShip && !p.gravBomb) {
+        const d = dist(playerShip.x, playerShip.y, p.x, p.y);
+        if (d < 35) {
+          // Draw laser from ship to projectile (stored for rendering)
+          if (!window._pdLasers) window._pdLasers = [];
+          window._pdLasers.push({ x1: playerShip.x, y1: playerShip.y, x2: p.x, y2: p.y, life: 4 });
+          spawnParticles(p.x, p.y, '#8888ff', 3, 1);
+          projectiles.splice(i, 1);
+          sfx.hit();
+          break; // one per cycle
+        }
+      }
+    }
+  }
 
   // AI
   if (enemyShip.alive) updateAI(enemyShip, playerShip);
@@ -5389,6 +5489,26 @@ function drawCombat() {
     ctx.fillStyle = '#fff';
     ctx.beginPath(); ctx.arc(px - 6, py - 6, R * 0.35, 0, TAU); ctx.fill();
     ctx.globalAlpha = 1;
+    // Gravity well rings (SC2 showed gravity influence)
+    ctx.globalAlpha = 0.06;
+    ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 1;
+    for (let gr = 1; gr <= 3; gr++) {
+      ctx.beginPath(); ctx.arc(px, py, R + gr * 12 + Math.sin(frame * 0.02 + gr) * 2, 0, TAU); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Point defense lasers
+  if (window._pdLasers) {
+    for (let i = window._pdLasers.length - 1; i >= 0; i--) {
+      const l = window._pdLasers[i];
+      ctx.globalAlpha = l.life / 4;
+      ctx.strokeStyle = '#8888ff'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(l.x1 - cx, l.y1 - cy); ctx.lineTo(l.x2 - cx, l.y2 - cy); ctx.stroke();
+      ctx.globalAlpha = 1;
+      l.life--;
+      if (l.life <= 0) window._pdLasers.splice(i, 1);
+    }
   }
 
   // Projectiles
@@ -5978,6 +6098,55 @@ function gameLoop() {
     drawGameOver();
   } else if (state === 'victory') {
     drawVictory();
+  }
+
+  // Help overlay (H or F1)
+  if (justPressed['KeyH'] || justPressed['F1']) window._showHelp = !window._showHelp;
+  if (window._showHelp) {
+    ctx.fillStyle = 'rgba(0,0,10,0.92)'; ctx.fillRect(10, 10, W - 20, H - 20);
+    ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 2; ctx.strokeRect(10, 10, W - 20, H - 20);
+    ctx.fillStyle = '#4488ff'; ctx.fillRect(10, 10, W - 20, 2);
+    ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('STAR CONTROL II — CONTROLS', W / 2, 28);
+    ctx.textAlign = 'left';
+    const help = [
+      ['HYPERSPACE', ''],
+      ['  Arrow Keys', 'Fly ship'],
+      ['  Space/Enter', 'Enter star system'],
+      ['  A', 'Autopilot to selected star'],
+      ['  Q', 'Open QuasiSpace portal (needs module)'],
+      ['  +/-', 'Zoom in/out'],
+      ['COMBAT', ''],
+      ['  Arrow Keys', 'Turn and thrust'],
+      ['  Z', 'Fire weapon'],
+      ['  X', 'Use special ability'],
+      ['  Escape', 'Emergency warp escape'],
+      ['PLANET LANDER', ''],
+      ['  Arrows', 'Move lander, Up=thrust'],
+      ['  Q/Escape', 'Launch back to orbit'],
+      ['ORBIT VIEW', ''],
+      ['  Left/Right', 'Select planet'],
+      ['  Space', 'Hold to scan'],
+      ['  Z/L', 'Land on planet'],
+      ['STARBASE', ''],
+      ['  Up/Down', 'Navigate menu'],
+      ['  Enter', 'Select option'],
+      ['', ''],
+      ['  H/F1', 'Toggle this help'],
+    ];
+    ctx.font = '7px monospace';
+    for (let i = 0; i < help.length; i++) {
+      const [key, desc] = help[i];
+      const y = 42 + i * 8;
+      if (!desc) {
+        ctx.fillStyle = '#ffcc44'; ctx.font = 'bold 7px monospace';
+        ctx.fillText(key, 20, y);
+        ctx.font = '7px monospace';
+      } else {
+        ctx.fillStyle = '#88bbff'; ctx.fillText(key, 20, y);
+        ctx.fillStyle = '#aaccdd'; ctx.fillText(desc, 130, y);
+      }
+    }
   }
 
   for (const k in justPressed) delete justPressed[k];
