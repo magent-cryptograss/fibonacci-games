@@ -1686,10 +1686,14 @@ class Ship {
     } else if (w.type === 'homing') {
       const target = this.isPlayer ? enemyShip : playerShip;
       projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed, vy: ny*w.speed, damage: w.damage, owner: this, color: w.color, size: w.size, life: 80, homing: true, target });
+    } else if (w.type === 'beam') {
+      // SC2-style beam weapon — longer range, faster projectile, beam visual
+      projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed*1.2 + this.vx*0.2, vy: ny*w.speed*1.2 + this.vy*0.2, damage: w.damage, owner: this, color: w.color, size: w.size, life: 35, isBeam: true, sx: this.x + nx*10, sy: this.y + ny*10 });
+      sfx.beam();
     } else {
       projectiles.push({ x: this.x + nx*10, y: this.y + ny*10, vx: nx*w.speed + this.vx*0.3, vy: ny*w.speed + this.vy*0.3, damage: w.damage, owner: this, color: w.color, size: w.size, life: 50 });
     }
-    sfx.shoot();
+    if (w.type !== 'beam') sfx.shoot();
   }
   useSpecial() {
     if (this.specialCooldown > 0 || this.energy < this.def.special.cost) return;
@@ -5601,9 +5605,8 @@ function updateCombat() {
   if (justPressed['Escape'] && state !== 'melee' && meleeState !== 'fight') {
     sfx.warp();
     fuel = Math.max(0, fuel - 5); // costs 5 fuel to emergency warp
-    if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); }
-    else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; }
-    music.play('map');
+    if (dialogue && dialogue.starIdx === -1) { returnToHyperSpace(); music.play('map'); }
+    else { state = 'orbit'; orbitCursor = 0; scanTimer = 0; music.play('orbit'); }
     gameMessage = 'Emergency warp! (-5 fuel)';
     messageTimer = 90;
     return;
@@ -5928,8 +5931,22 @@ function drawCombat() {
       ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - p.vx * 2, sy - p.vy * 2); ctx.stroke();
       ctx.globalAlpha = 1;
+    } else if (p.isBeam) {
+      // SC2-style beam weapon: glowing line from source to current position
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = p.color; ctx.lineWidth = p.size;
+      ctx.beginPath(); ctx.moveTo(sx - p.vx * 3, sy - p.vy * 3); ctx.lineTo(sx, sy); ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, p.size - 2);
+      ctx.beginPath(); ctx.moveTo(sx - p.vx * 2, sy - p.vy * 2); ctx.lineTo(sx, sy); ctx.stroke();
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = p.color; ctx.lineWidth = p.size + 4;
+      ctx.beginPath(); ctx.moveTo(sx - p.vx * 3, sy - p.vy * 3); ctx.lineTo(sx, sy); ctx.stroke();
+      ctx.globalAlpha = 1;
+      // Impact glow at tip
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(sx, sy, 2, 0, TAU); ctx.fill();
     } else if (p.size >= 4) {
-      // Large projectile (beam weapons, Kohr-Ah blades, etc): glow effect
+      // Large projectile (Kohr-Ah blades, etc): glow effect
       ctx.globalAlpha = 0.3;
       ctx.fillStyle = p.color;
       ctx.beginPath(); ctx.arc(sx, sy, p.size + 2, 0, TAU); ctx.fill();
@@ -6077,6 +6094,33 @@ function drawCombat() {
       ctx.fillStyle = enemyShip.def.accent || '#ff6666'; ctx.fillRect(W - 32, by, 28, 2);
     }
   }
+  // SC2-style mini radar (bottom center, between HUD panels)
+  const radarX = W / 2, radarY = H - 20, radarR = 16;
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(radarX, radarY, radarR + 1, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = '#334466'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(radarX, radarY, radarR, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(radarX - radarR, radarY); ctx.lineTo(radarX + radarR, radarY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(radarX, radarY - radarR); ctx.lineTo(radarX, radarY + radarR); ctx.stroke();
+  ctx.globalAlpha = 1;
+  // Player dot (green)
+  const rScale = radarR / (ARENA * 1.2);
+  const rpx = radarX + playerShip.x * rScale, rpy = radarY + playerShip.y * rScale;
+  ctx.fillStyle = '#44ff88';
+  ctx.fillRect(rpx - 1, rpy - 1, 2, 2);
+  // Enemy dot (red)
+  const rex = radarX + enemyShip.x * rScale, rey = radarY + enemyShip.y * rScale;
+  ctx.fillStyle = '#ff4444';
+  ctx.fillRect(rex - 1, rey - 1, 2, 2);
+  // Planet dot (blue, if exists)
+  if (combatPlanet) {
+    const rpx2 = radarX + combatPlanet.x * rScale, rpy2 = radarY + combatPlanet.y * rScale;
+    ctx.fillStyle = '#4488ff';
+    ctx.beginPath(); ctx.arc(rpx2, rpy2, 2, 0, TAU); ctx.fill();
+  }
+
   // End screen shake
   if (shaking) ctx.restore();
 }
