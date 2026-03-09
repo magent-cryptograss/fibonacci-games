@@ -1821,12 +1821,16 @@ class Ship {
       this.specialCooldown = 60;
       sfx.alarm();
     } else if (sp.name === 'Fireblade') {
-      // Kohr-Ah spinning blade
-      for (let bi = 0; bi < 6; bi++) {
-        const ba = (bi / 6) * TAU;
-        projectiles.push({ x: this.x, y: this.y, vx: Math.cos(ba) * 5, vy: Math.sin(ba) * 5, damage: 3, owner: this, color: '#ff2222', size: 4, life: 50 });
-      }
-      this.specialCooldown = 90;
+      // Kohr-Ah FRIED — single spinning blade that flies out then boomerangs back
+      const fa = this.angle - Math.PI/2;
+      projectiles.push({
+        x: this.x, y: this.y,
+        vx: Math.cos(fa) * 6, vy: Math.sin(fa) * 6,
+        damage: 4, owner: this, color: '#ff2222', size: 5, life: 120,
+        isFRIED: true, originShip: this, spinAngle: 0,
+        phase: 'out', phaseTimer: 40
+      });
+      this.specialCooldown = 60;
       sfx.alarm();
     } else if (sp.name === 'Reverse') {
       // Supox/Umgah reverse thrust
@@ -1948,6 +1952,15 @@ class Ship {
         return;
       }
       this.crew = 0; this.alive = false;
+      // SC2 escape pod — captain ejects!
+      spawnExplosion(this.x, this.y, this.def.color, 15);
+      const podAngle = Math.random() * TAU;
+      projectiles.push({
+        x: this.x, y: this.y,
+        vx: Math.cos(podAngle) * 3, vy: Math.sin(podAngle) * 3,
+        damage: 0, owner: this, color: '#ffffff', size: 2, life: 180,
+        isEscapePod: true
+      });
     }
   }
   draw(cx, cy) {
@@ -2575,6 +2588,21 @@ function initCombat(enemyType) {
   combatPlanet = { x: 0, y: 0, radius: PLANET_RADIUS };
   window._combatZoom = 0.5;
   window._pdLasers = [];
+  // SC2 combat asteroids — random debris floating in the arena
+  window._asteroids = [];
+  const numAsteroids = 3 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < numAsteroids; i++) {
+    window._asteroids.push({
+      x: (Math.random() - 0.5) * 600,
+      y: (Math.random() - 0.5) * 600,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      size: 3 + Math.random() * 5,
+      rot: Math.random() * TAU,
+      rotSpeed: (Math.random() - 0.5) * 0.03,
+      color: ['#887766','#666655','#998877','#554433'][Math.floor(Math.random() * 4)]
+    });
+  }
 }
 
 // ==================== DRAWING HELPERS ====================
@@ -5158,8 +5186,29 @@ function drawDialogue() {
   ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
   ctx.strokeRect(3, 3, portW - 6, portH - 6);
 
-  // Talking animation — slight portrait wobble
-  const talkBob = Math.sin(frame * 0.15) * 0.5;
+  // SC2-style talking animation — mouth moves during speech
+  // Mouth overlay drawn over portrait at scaled position
+  if (dialogue.text) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(2, 2, portW - 4, portH - 4); ctx.clip();
+    const mScale = Math.min((portW - 8) / 64, (portH - 8) / 64);
+    ctx.translate(portW / 2 - 32 * mScale, portH / 2 - 32 * mScale);
+    ctx.scale(mScale, mScale);
+    // Animated mouth — opens and closes rhythmically
+    const mouthOpen = Math.abs(Math.sin(frame * 0.25)) * 4 + 1;
+    const mouthX = 32, mouthY = 50;
+    ctx.fillStyle = '#110808';
+    ctx.beginPath();
+    ctx.ellipse(mouthX, mouthY, 6, mouthOpen, 0, 0, TAU);
+    ctx.fill();
+    // Lip highlight
+    ctx.strokeStyle = DIALOGUES[dialogue.race]?.portrait?.skin || '#884444';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(mouthX, mouthY, 6, mouthOpen, 0, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // Race name plate (below portrait, SC2 style)
   ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, portH, portW, H - portH);
@@ -5542,11 +5591,18 @@ function drawLander() {
     if (dx < -10 || dx > W + 10) continue;
     const mt = MINERAL_TYPES[dep.type];
     ctx.fillStyle = mt.color;
-    // SC2 mineral dots: small colored squares
+    // SC2 mineral deposits: small colored squares with sparkle
     ctx.fillRect(dx - 2, dep.y - 2, 4, 4);
     ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.4;
     ctx.fillRect(dx - 1, dep.y - 1, 1, 1);
     ctx.globalAlpha = 1;
+    // SC2-style sparkle — periodic glint
+    if ((frame + dep.x * 7) % 40 < 4) {
+      ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.7;
+      ctx.fillRect(dx - 4, dep.y, 8, 1);
+      ctx.fillRect(dx, dep.y - 4, 1, 8);
+      ctx.globalAlpha = 1;
+    }
   }
 
   // Bio creatures
@@ -5797,6 +5853,26 @@ function updateCombat() {
       const spd = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
       if (spd > 6) { p.vx *= 6/spd; p.vy *= 6/spd; }
     }
+    // Kohr-Ah FRIED boomerang
+    if (p.isFRIED) {
+      p.spinAngle += 0.3;
+      p.phaseTimer--;
+      if (p.phase === 'out' && p.phaseTimer <= 0) {
+        p.phase = 'return';
+      }
+      if (p.phase === 'return' && p.originShip && p.originShip.alive) {
+        const a = angleTo(p.x, p.y, p.originShip.x, p.originShip.y);
+        p.vx = Math.cos(a) * 5;
+        p.vy = Math.sin(a) * 5;
+        // Despawn when close to owner
+        if (dist(p.x, p.y, p.originShip.x, p.originShip.y) < 15) {
+          p.life = 0;
+        }
+      } else if (p.phase === 'return') {
+        // Owner dead, blade just drifts and fades
+        p.vx *= 0.98; p.vy *= 0.98;
+      }
+    }
     // Gravity bomb pulls
     if (p.gravBomb) {
       const target = p.owner === playerShip ? enemyShip : playerShip;
@@ -5832,13 +5908,13 @@ function updateCombat() {
     const p = projectiles[i];
     if (p.life <= 0) { projectiles.splice(i, 1); continue; }
     // vs player
-    if (p.owner !== playerShip && dist(p.x, p.y, playerShip.x, playerShip.y) < 12 && !p.gravBomb) {
+    if (p.owner !== playerShip && dist(p.x, p.y, playerShip.x, playerShip.y) < 12 && !p.gravBomb && !p.isEscapePod) {
       playerShip.takeDamage(p.damage);
       spawnParticles(p.x, p.y, '#ff8844', 3, 1.5);
       projectiles.splice(i, 1); sfx.hit(); continue;
     }
     // vs enemy
-    if (p.owner !== enemyShip && dist(p.x, p.y, enemyShip.x, enemyShip.y) < 12 && !p.gravBomb) {
+    if (p.owner !== enemyShip && dist(p.x, p.y, enemyShip.x, enemyShip.y) < 12 && !p.gravBomb && !p.isEscapePod) {
       enemyShip.takeDamage(p.damage);
       spawnParticles(p.x, p.y, '#ff8844', 3, 1.5);
       projectiles.splice(i, 1); sfx.hit(); continue;
@@ -5875,6 +5951,29 @@ function updateCombat() {
   // Particles
   for (const p of particles) p.update();
   particles = particles.filter(p => p.life > 0);
+
+  // SC2 combat asteroids — drift and wrap, damage ships on collision
+  if (window._asteroids) {
+    const ARENA = 400;
+    for (const a of window._asteroids) {
+      a.x += a.vx; a.y += a.vy; a.rot += a.rotSpeed;
+      if (a.x < -ARENA) a.x += ARENA * 2;
+      if (a.x > ARENA) a.x -= ARENA * 2;
+      if (a.y < -ARENA) a.y += ARENA * 2;
+      if (a.y > ARENA) a.y -= ARENA * 2;
+      // Collision with ships
+      if (playerShip.alive && dist(a.x, a.y, playerShip.x, playerShip.y) < a.size + 6) {
+        playerShip.takeDamage(1);
+        spawnParticles(a.x, a.y, a.color, 4, 1);
+        sfx.hit();
+      }
+      if (enemyShip.alive && dist(a.x, a.y, enemyShip.x, enemyShip.y) < a.size + 6) {
+        enemyShip.takeDamage(1);
+        spawnParticles(a.x, a.y, a.color, 4, 1);
+        sfx.hit();
+      }
+    }
+  }
 
   // Check win/lose
   if (!playerShip.alive) {
@@ -6036,6 +6135,32 @@ function drawCombat() {
     ctx.globalAlpha = 1;
   }
 
+  // SC2 combat asteroids rendering
+  if (window._asteroids) {
+    for (const a of window._asteroids) {
+      const ax = a.x - cx, ay = a.y - cy;
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(a.rot);
+      // Irregular rocky shape
+      ctx.fillStyle = a.color;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * TAU;
+        const r = a.size * (0.7 + ((i * 137) % 10) / 30);
+        if (i === 0) ctx.moveTo(Math.cos(ang) * r, Math.sin(ang) * r);
+        else ctx.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
+      }
+      ctx.closePath(); ctx.fill();
+      // Highlight
+      ctx.fillStyle = '#aaa';
+      ctx.globalAlpha = 0.3;
+      ctx.beginPath(); ctx.arc(-a.size * 0.2, -a.size * 0.2, a.size * 0.3, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
   // Point defense lasers
   if (window._pdLasers) {
     for (let i = window._pdLasers.length - 1; i >= 0; i--) {
@@ -6111,8 +6236,46 @@ function drawCombat() {
       // Impact glow at tip
       ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(sx, sy, 2, 0, TAU); ctx.fill();
+    } else if (p.isEscapePod) {
+      // SC2 escape pod — tiny capsule tumbling away
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(frame * 0.1);
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(-2, -3, 4, 6);
+      ctx.fillStyle = '#88ccff';
+      ctx.fillRect(-1, -2, 2, 2); // window
+      ctx.fillStyle = '#ff6644';
+      ctx.fillRect(-1, 3, 2, 2); // thruster
+      ctx.restore();
+    } else if (p.isFRIED) {
+      // Kohr-Ah FRIED: spinning blade with 4 arms
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(p.spinAngle);
+      // Outer glow
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#ff4422';
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      // Blade arms
+      ctx.strokeStyle = '#ff2222'; ctx.lineWidth = 2;
+      for (let ba = 0; ba < 4; ba++) {
+        const a = (ba / 4) * TAU;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * 7, Math.sin(a) * 7);
+        ctx.stroke();
+        // Tip glow
+        ctx.fillStyle = '#ffaa44';
+        ctx.beginPath(); ctx.arc(Math.cos(a) * 7, Math.sin(a) * 7, 2, 0, TAU); ctx.fill();
+      }
+      // Center core
+      ctx.fillStyle = '#ff6644';
+      ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill();
+      ctx.restore();
     } else if (p.size >= 4) {
-      // Large projectile (Kohr-Ah blades, etc): glow effect
+      // Large projectile: glow effect
       ctx.globalAlpha = 0.3;
       ctx.fillStyle = p.color;
       ctx.beginPath(); ctx.arc(sx, sy, p.size + 2, 0, TAU); ctx.fill();
@@ -6271,15 +6434,22 @@ function drawCombat() {
   ctx.beginPath(); ctx.moveTo(radarX - radarR, radarY); ctx.lineTo(radarX + radarR, radarY); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(radarX, radarY - radarR); ctx.lineTo(radarX, radarY + radarR); ctx.stroke();
   ctx.globalAlpha = 1;
-  // Player dot (green)
+  // Player dot (green) with facing arrow
   const rScale = radarR / (ARENA * 1.2);
   const rpx = radarX + playerShip.x * rScale, rpy = radarY + playerShip.y * rScale;
   ctx.fillStyle = '#44ff88';
   ctx.fillRect(rpx - 1, rpy - 1, 2, 2);
-  // Enemy dot (red)
+  // Player facing line
+  const pfa = playerShip.angle - Math.PI / 2;
+  ctx.strokeStyle = '#44ff88'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(rpx, rpy); ctx.lineTo(rpx + Math.cos(pfa) * 4, rpy + Math.sin(pfa) * 4); ctx.stroke();
+  // Enemy dot (red) with facing arrow
   const rex = radarX + enemyShip.x * rScale, rey = radarY + enemyShip.y * rScale;
   ctx.fillStyle = '#ff4444';
   ctx.fillRect(rex - 1, rey - 1, 2, 2);
+  const efa = enemyShip.angle - Math.PI / 2;
+  ctx.strokeStyle = '#ff4444';
+  ctx.beginPath(); ctx.moveTo(rex, rey); ctx.lineTo(rex + Math.cos(efa) * 4, rey + Math.sin(efa) * 4); ctx.stroke();
   // Planet dot (blue, if exists)
   if (combatPlanet) {
     const rpx2 = radarX + combatPlanet.x * rScale, rpy2 = radarY + combatPlanet.y * rScale;
