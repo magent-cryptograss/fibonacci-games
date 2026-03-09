@@ -2116,11 +2116,11 @@ function generateStarMap() {
   }
 
   let starIdx = 0;
-  // Generate 3 stars per territory (24 alien stars) + 8 neutral stars = 32 total + Sol
+  // Generate 6 stars per territory + many neutral stars for a bigger galaxy (SC2 had 500+)
   for (let ti = 0; ti < territories.length; ti++) {
     const t = territories[ti];
     const constel = constellations[ti];
-    for (let si = 0; si < 3; si++) {
+    for (let si = 0; si < 6; si++) {
       // Cluster stars around territory center with some spread
       const angle = (si / 3) * TAU + Math.random() * 0.8;
       const radius = 80 + Math.random() * 120;
@@ -2134,20 +2134,21 @@ function generateStarMap() {
       starMap.push({
         x, y, name: sName, color: col, type: 'normal',
         planets: makePlanets(greekNames[starIdx % greekNames.length], numPlanets),
-        alien: t.race, territory: t.race,
+        alien: si < 2 ? t.race : null, // Only first 2 stars per territory have aliens
+        territory: t.race,
         artifact: hasArtifact, visited: false,
       });
       starIdx++;
     }
   }
-  // Add 40 neutral/unowned stars scattered across the map
-  for (let ni = 0; ni < 40; ni++) {
+  // Add 150 neutral/unowned stars scattered across the map (SC2 had 500+ total)
+  for (let ni = 0; ni < 150; ni++) {
     let x, y, attempts = 0;
     do {
       x = (Math.random() - 0.5) * MAP_SIZE;
       y = (Math.random() - 0.5) * MAP_SIZE;
       attempts++;
-    } while (attempts < 50 && starMap.some(s => dist(s.x, s.y, x, y) < 60));
+    } while (attempts < 50 && starMap.some(s => dist(s.x, s.y, x, y) < 35));
     const col = STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)];
     const sName = `${greekNames[(starIdx + ni) % greekNames.length]} ${constellations[(ni) % constellations.length]}`;
     starMap.push({
@@ -3928,6 +3929,22 @@ function drawMap() {
     }
   }
 
+  // === SC2 Fuel Range Circle — shows how far you can travel ===
+  if (fuel > 0) {
+    const fuelRange = fuel * 10 * mapZoom; // visual radius based on fuel
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = '#22cc44'; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(W/2, mapH/2, fuelRange, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    // Inner safe-return range (half fuel = can get there and back)
+    const safeRange = fuel * 5 * mapZoom;
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#22cc44';
+    ctx.beginPath(); ctx.arc(W/2, mapH/2, safeRange, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
   // === Player ship at center (SC2 — small flagship sprite) ===
   const isThrusting = keys['ArrowUp'] || keys['KeyW'];
   ctx.save();
@@ -4723,34 +4740,57 @@ function drawOrbit() {
   ctx.fillStyle = '#aaccff'; ctx.fillText(p.type || 'Unknown', panX + 40, ppy + ppr + 30);
   // SC2-style data readout
   if (p.scanned) {
-    // Show deposit breakdown when scanned
+    // SC2-style full planet scan readout
+    let sy2 = ppy + ppr + 28;
+    const lbl = (text, val, valColor) => {
+      ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+      ctx.fillText(text, panX + 6, sy2);
+      ctx.fillStyle = valColor || '#aaccff';
+      ctx.fillText(val, panX + 52, sy2);
+      sy2 += 10;
+    };
+    // SC2 planet stats: gravity, temp, weather, tectonics
+    const grav = p.type === 'Gas Giant' ? 'High' : p.radius > 14 ? 'Med' : 'Low';
+    const gravC = grav === 'High' ? '#ff4444' : grav === 'Med' ? '#ffcc44' : '#44ff44';
+    const tempMap = { Ice: 'Cold', Desert: 'Hot', Volcanic: 'Inferno', Toxic: 'Warm', Jungle: 'Warm', Water: 'Mild', Rocky: 'Cold', Rainbow: 'Mild', 'Gas Giant': 'Frigid' };
+    const temp = tempMap[p.type] || 'Mild';
+    const tempC = { Cold: '#4488ff', Frigid: '#4488ff', Mild: '#44ff44', Warm: '#ffcc44', Hot: '#ff8844', Inferno: '#ff4444' }[temp] || '#aaccff';
+    const weatherMap = { Toxic: 'Caustic', Volcanic: 'Firestorm', Water: 'Storms', Jungle: 'Rain', Desert: 'Dust', Ice: 'Blizzard', Rocky: 'None', Rainbow: 'Prismatic', 'Gas Giant': 'Violent' };
+    const weather = weatherMap[p.type] || 'None';
+    const weatherC = weather === 'None' ? '#44ff44' : weather === 'Rain' ? '#88ccff' : '#ffcc44';
+    const tecMap = { Volcanic: 'Class 6', Rocky: 'Class 2', Desert: 'Class 1', Water: 'Class 3', Jungle: 'Class 2', Toxic: 'Class 4', Ice: 'Class 1', Rainbow: 'Class 3', 'Gas Giant': 'N/A' };
+    const tec = tecMap[p.type] || 'Class 1';
+    const tecC = tec === 'Class 6' || tec === 'Class 5' ? '#ff4444' : tec === 'Class 4' || tec === 'Class 3' ? '#ffcc44' : '#44ff44';
+    lbl('Gravity:', grav, gravC);
+    lbl('Temp:', temp, tempC);
+    lbl('Weather:', weather, weatherC);
+    lbl('Tectonic:', tec, tecC);
+    // Separator
+    ctx.fillStyle = '#223366'; ctx.fillRect(panX + 4, sy2 - 2, panW2 - 8, 1); sy2 += 4;
+    // Deposits and value
     const remaining = p.deposits.filter(d => !d.collected).length;
-    ctx.fillStyle = '#6688aa'; ctx.fillText('Deposits:', panX + 6, ppy + ppr + 42);
-    ctx.fillStyle = '#ffcc44'; ctx.fillText(`${remaining}/${p.deposits.length}`, panX + 60, ppy + ppr + 42);
-    ctx.fillStyle = '#6688aa'; ctx.fillText('Value:', panX + 6, ppy + ppr + 54);
+    lbl('Minerals:', `${remaining}/${p.deposits.length}`, '#ffcc44');
     const remValue = p.deposits.filter(d => !d.collected).reduce((s, d) => s + MINERAL_TYPES[d.type].value, 0);
-    ctx.fillStyle = '#ffcc44'; ctx.fillText(`${remValue} RU`, panX + 42, ppy + ppr + 54);
-    ctx.fillStyle = '#6688aa'; ctx.fillText('Bio:', panX + 6, ppy + ppr + 66);
-    ctx.fillStyle = '#44ff44'; ctx.fillText(`${p.bioCount || 0}`, panX + 30, ppy + ppr + 66);
-    ctx.fillStyle = '#6688aa'; ctx.fillText('Hazard:', panX + 6, ppy + ppr + 78);
+    lbl('Value:', `${remValue} RU`, '#ffcc44');
+    lbl('Bio life:', `${p.bioCount || 0}`, '#44ff44');
     const hazLevels = ['None', 'Low', 'Medium', 'High'];
     const hazColors = ['#44ff44', '#ffcc44', '#ff8844', '#ff4444'];
-    ctx.fillStyle = hazColors[p.hazard || 0]; ctx.fillText(hazLevels[p.hazard || 0], panX + 48, ppy + ppr + 78);
+    lbl('Danger:', hazLevels[p.hazard || 0], hazColors[p.hazard || 0]);
 
     // SC2 mineral type breakdown (colored dots)
+    ctx.fillStyle = '#223366'; ctx.fillRect(panX + 4, sy2 - 2, panW2 - 8, 1); sy2 += 4;
     const mineralCounts = {};
     for (const d of p.deposits.filter(d => !d.collected)) {
       mineralCounts[d.type] = (mineralCounts[d.type] || 0) + 1;
     }
-    let mRowY = ppy + ppr + 90;
     for (const typeIdx in mineralCounts) {
       const mt = MINERAL_TYPES[typeIdx];
       ctx.fillStyle = mt.color;
-      ctx.fillRect(panX + 6, mRowY - 4, 5, 5);
+      ctx.fillRect(panX + 6, sy2 - 4, 5, 5);
       ctx.fillStyle = '#8899aa'; ctx.font = '6px monospace';
-      ctx.fillText(`${mt.name} x${mineralCounts[typeIdx]}`, panX + 14, mRowY);
-      mRowY += 9;
-      if (mRowY > panH2 - 30) break;
+      ctx.fillText(`${mt.name} x${mineralCounts[typeIdx]}`, panX + 14, sy2);
+      sy2 += 9;
+      if (sy2 > panH2 - 30) break;
     }
   } else {
     ctx.fillStyle = '#6688aa'; ctx.fillText('HOLD SPACE', panX + 6, ppy + ppr + 42);
@@ -5211,19 +5251,45 @@ function updateLander() {
     bio.y = surfaceHeight - bTerrH - 4;
   }
 
-  // Hazards based on planet type
-  if (p.hazard > 0 && frame % 60 === 0 && Math.random() < p.hazard * 0.15) {
-    // Spawn hazard (earthquake/lightning/lava)
-    const hx = landerX + (Math.random() - 0.5) * 200;
-    const hType = p.type === 'Volcanic' ? 'lava' : p.type === 'Toxic' ? 'acid' : 'quake';
-    surfaceHazards.push({ x: hx, y: surfaceHeight - 10, type: hType, timer: 40 + Math.random() * 30 });
+  // SC2-style hazards based on planet type
+  if (p.hazard > 0 && frame % 40 === 0 && Math.random() < p.hazard * 0.2) {
+    const hx = landerX + (Math.random() - 0.5) * 250;
+    let hType;
+    if (p.type === 'Volcanic') hType = Math.random() < 0.7 ? 'lava' : 'quake';
+    else if (p.type === 'Toxic') hType = Math.random() < 0.6 ? 'acid' : 'lightning';
+    else if (p.type === 'Water') hType = Math.random() < 0.5 ? 'lightning' : 'quake';
+    else if (p.type === 'Ice') hType = Math.random() < 0.5 ? 'quake' : 'lightning';
+    else if (p.type === 'Desert') hType = 'meteorite';
+    else if (p.type === 'Jungle') hType = Math.random() < 0.5 ? 'lightning' : 'bioattack';
+    else hType = ['quake', 'lightning', 'meteorite'][Math.floor(Math.random() * 3)];
+    surfaceHazards.push({ x: hx, y: hType === 'lightning' ? 0 : hType === 'meteorite' ? 0 : surfaceHeight - 10, type: hType, timer: hType === 'lightning' ? 15 : hType === 'meteorite' ? 60 : 40 + Math.random() * 30, vy: hType === 'meteorite' ? 3 : 0 });
+  }
+  // Hostile bio creatures attack lander (SC2 had aggressive life forms)
+  for (const bio of surfaceBio) {
+    if (!bio.alive) continue;
+    const dx = landerX - bio.x;
+    if (Math.abs(dx) < 60 && Math.abs(landerY - bio.y) < 30) {
+      bio.vx = Math.sign(dx) * 1.5; // chase lander
+      if (Math.abs(dx) < 10 && Math.abs(landerY - bio.y) < 12 && frame % 20 === 0) {
+        landerHP--; sfx.hit(); screenShake = 2;
+        gameMessage = 'Bio-hazard attack!'; messageTimer = 30;
+      }
+    }
   }
   // Update hazards
   for (let i = surfaceHazards.length - 1; i >= 0; i--) {
     const h = surfaceHazards[i];
     h.timer--;
+    if (h.type === 'meteorite') {
+      h.y += h.vy; h.x += (Math.random() - 0.5) * 0.5;
+      if (h.y > surfaceHeight - 10) { h.timer = 0; screenShake = 4; sfx.hit(); }
+    }
     // Damage lander if close
-    if (h.timer > 10 && h.timer < 30 && Math.abs(landerX - h.x) < 20 && landerY > surfaceHeight - 40) {
+    if (h.type === 'lightning' && h.timer < 5 && h.timer > 0) {
+      if (Math.abs(landerX - h.x) < 15) { landerHP -= 2; sfx.explode(); screenShake = 5; }
+    } else if (h.type === 'meteorite' && Math.abs(landerX - h.x) < 12 && Math.abs(landerY - h.y) < 12) {
+      landerHP -= 2; sfx.hit(); screenShake = 4; h.timer = 0;
+    } else if (h.timer > 10 && h.timer < 30 && Math.abs(landerX - h.x) < 20 && landerY > surfaceHeight - 40) {
       if (frame % 15 === 0) { landerHP--; sfx.hit(); screenShake = 3; }
     }
     if (h.timer <= 0) surfaceHazards.splice(i, 1);
@@ -5383,9 +5449,50 @@ function drawLander() {
         ctx.fillRect(ax - 2, surfaceHeight - 20 - i * 6, 4, 4);
       }
       ctx.globalAlpha = 1;
+    } else if (h.type === 'lightning') {
+      // SC2 lightning bolt — jagged line from sky to ground
+      if (h.timer < 10) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        ctx.globalAlpha = h.timer / 10;
+        ctx.beginPath(); ctx.moveTo(hx, 20);
+        let lx2 = hx, ly2 = 20;
+        for (let seg = 0; seg < 8; seg++) {
+          lx2 += (Math.random() - 0.5) * 20;
+          ly2 += (surfaceHeight - 20) / 8;
+          ctx.lineTo(lx2, ly2);
+        }
+        ctx.stroke();
+        // Flash glow
+        ctx.strokeStyle = '#88ccff'; ctx.lineWidth = 4; ctx.globalAlpha *= 0.3;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    } else if (h.type === 'meteorite') {
+      // Falling meteorite
+      ctx.fillStyle = '#ff8844';
+      ctx.beginPath(); ctx.arc(hx, h.y, 3, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffcc66';
+      ctx.beginPath(); ctx.arc(hx, h.y, 1.5, 0, TAU); ctx.fill();
+      // Trail
+      ctx.globalAlpha = 0.4; ctx.strokeStyle = '#ff4400'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(hx, h.y); ctx.lineTo(hx - 1, h.y - 15); ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (h.type === 'bioattack') {
+      // Bio creature attack — green danger circle
+      ctx.globalAlpha = 0.3 + Math.sin(frame * 0.3) * 0.2;
+      ctx.fillStyle = '#44ff00';
+      ctx.beginPath(); ctx.arc(hx, surfaceHeight - 10, 8, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
     } else {
-      // Quake — screen shake
-      if (h.timer > 15 && h.timer < 35) screenShake = 2;
+      // Quake — screen shake + ground crack visual
+      if (h.timer > 15 && h.timer < 35) {
+        screenShake = 2;
+        ctx.strokeStyle = '#664422'; ctx.lineWidth = 2; ctx.globalAlpha = 0.6;
+        ctx.beginPath(); ctx.moveTo(hx - 15, surfaceHeight - 5);
+        ctx.lineTo(hx - 5, surfaceHeight - 12); ctx.lineTo(hx + 3, surfaceHeight - 6);
+        ctx.lineTo(hx + 15, surfaceHeight - 10); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
