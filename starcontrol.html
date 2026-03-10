@@ -342,6 +342,88 @@ const music = (() => {
       arp: null
     },
   };
+  // MOD tracker-style instrument: detuned pair + vibrato + filter for rich SC2 sound
+  let delayNode = null, delayGain = null;
+  function getDelay(c) {
+    if (!delayNode) {
+      delayNode = c.createDelay(0.5);
+      delayNode.delayTime.value = 0.22;
+      delayGain = c.createGain();
+      delayGain.gain.value = 0.2;
+      const feedback = c.createGain();
+      feedback.gain.value = 0.3;
+      delayNode.connect(feedback);
+      feedback.connect(delayNode);
+      delayNode.connect(delayGain);
+      delayGain.connect(masterGain);
+    }
+    return delayNode;
+  }
+  // Rich lead: two detuned oscillators + vibrato LFO + lowpass filter
+  function schedLead(c, freq, time, dur, waveType, vol) {
+    if (freq <= 0) return;
+    const v = vol || 0.28;
+    const g = c.createGain();
+    const flt = c.createBiquadFilter();
+    flt.type = 'lowpass'; flt.frequency.setValueAtTime(freq * 4, time); flt.Q.value = 1.5;
+    // Detuned pair for chorus
+    const o1 = c.createOscillator(), o2 = c.createOscillator();
+    o1.type = waveType; o2.type = waveType;
+    o1.frequency.setValueAtTime(freq, time);
+    o2.frequency.setValueAtTime(freq * 1.004, time); // slight detune
+    // Vibrato LFO
+    const lfo = c.createOscillator(), lfoG = c.createGain();
+    lfo.type = 'sine'; lfo.frequency.value = 5.5;
+    lfoG.gain.value = freq * 0.008;
+    lfo.connect(lfoG); lfoG.connect(o1.frequency); lfoG.connect(o2.frequency);
+    // ADSR-ish envelope
+    const atk = Math.min(0.02, dur * 0.1);
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(v, time + atk);
+    g.gain.setValueAtTime(v, time + dur * 0.6);
+    g.gain.linearRampToValueAtTime(0, time + dur * 0.95);
+    const g2 = c.createGain(); g2.gain.value = 0.5; // mix pair
+    o1.connect(g2); o2.connect(g2);
+    g2.connect(flt); flt.connect(g); g.connect(masterGain);
+    // Send to delay for echo
+    const dSend = c.createGain(); dSend.gain.value = 0.15;
+    flt.connect(dSend); dSend.connect(getDelay(c));
+    o1.start(time); o1.stop(time + dur);
+    o2.start(time); o2.stop(time + dur);
+    lfo.start(time); lfo.stop(time + dur);
+    oscs.push(o1, o2, lfo);
+  }
+  // Bass: single osc with punch envelope + subtle filter
+  function schedBass(c, freq, time, dur) {
+    if (freq <= 0) return;
+    const o = c.createOscillator(), g = c.createGain();
+    const flt = c.createBiquadFilter();
+    flt.type = 'lowpass'; flt.frequency.setValueAtTime(freq * 6, time);
+    flt.frequency.exponentialRampToValueAtTime(freq * 2, time + dur * 0.5);
+    flt.Q.value = 2;
+    o.type = 'sawtooth'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.4, time + 0.01);
+    g.gain.setValueAtTime(0.35, time + dur * 0.5);
+    g.gain.linearRampToValueAtTime(0, time + dur * 0.9);
+    o.connect(flt); flt.connect(g); g.connect(masterGain);
+    o.start(time); o.stop(time + dur); oscs.push(o);
+  }
+  // Arp: bright sine pair
+  function schedArp(c, freq, time, dur) {
+    if (freq <= 0) return;
+    const o1 = c.createOscillator(), o2 = c.createOscillator(), g = c.createGain();
+    o1.type = 'sine'; o2.type = 'triangle';
+    o1.frequency.value = freq; o2.frequency.value = freq * 1.002;
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.1, time + 0.01);
+    g.gain.linearRampToValueAtTime(0, time + dur * 0.7);
+    const mix = c.createGain(); mix.gain.value = 0.5;
+    o1.connect(mix); o2.connect(mix); mix.connect(g); g.connect(masterGain);
+    o1.start(time); o1.stop(time + dur);
+    o2.start(time); o2.stop(time + dur);
+    oscs.push(o1, o2);
+  }
   function play(name) {
     if (currentTrack === name) return;
     stop(); currentTrack = name;
@@ -352,19 +434,16 @@ const music = (() => {
     const bl = 60 / tr.tempo;
     function sched() {
       const now = c.currentTime;
-      // Bass line
       while (bt < now + 2) {
         const [f,d] = tr.bass[bi % tr.bass.length];
-        if (f > 0) { const o = c.createOscillator(), g = c.createGain(); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.45, bt); g.gain.linearRampToValueAtTime(0, bt+d*bl*0.9); o.connect(g); g.connect(masterGain); o.start(bt); o.stop(bt+d*bl); oscs.push(o); }
+        schedBass(c, f, bt, d * bl);
         bt += d * bl; bi++;
       }
-      // Lead melody
       while (lt < now + 2) {
         const [f,d] = tr.lead[li % tr.lead.length];
-        if (f > 0) { const o = c.createOscillator(), g = c.createGain(); o.type = tr.type || 'triangle'; o.frequency.value = f; g.gain.setValueAtTime(0.35, lt); g.gain.linearRampToValueAtTime(0, lt+d*bl*0.85); o.connect(g); g.connect(masterGain); o.start(lt); o.stop(lt+d*bl); oscs.push(o); }
+        schedLead(c, f, lt, d * bl, tr.type || 'triangle');
         lt += d * bl; li++;
       }
-      // Drum pattern
       if (tr.drums) {
         while (dt < now + 2) {
           const [d, type] = tr.drums[di % tr.drums.length];
@@ -372,15 +451,14 @@ const music = (() => {
           dt += d * bl; di++;
         }
       }
-      // Arpeggio layer (accompaniment)
       if (tr.arp) {
         while (at < now + 2) {
           const [f,d] = tr.arp[ai % tr.arp.length];
-          if (f > 0) { const o = c.createOscillator(), g = c.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.12, at); g.gain.linearRampToValueAtTime(0, at+d*bl*0.7); o.connect(g); g.connect(masterGain); o.start(at); o.stop(at+d*bl); oscs.push(o); }
+          schedArp(c, f, at, d * bl);
           at += d * bl; ai++;
         }
       }
-      if (oscs.length > 120) oscs.splice(0, 60);
+      if (oscs.length > 200) oscs.splice(0, 100);
     }
     sched(); loopTimer = setInterval(sched, 500);
   }
