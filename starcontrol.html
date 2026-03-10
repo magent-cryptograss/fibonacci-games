@@ -1729,7 +1729,10 @@ class Ship {
   update() {
     if (this.flash > 0) this.flash--;
     if (this.fireTimer > 0) this.fireTimer--;
-    if (this.shieldTimer > 0) this.shieldTimer--;
+    if (this.shieldTimer > 0) {
+      this.shieldTimer--;
+      if (this.shieldTimer <= 0 && this.cloaked) this.cloaked = false;
+    }
     if (this.specialCooldown > 0) this.specialCooldown--;
     const rechargeBonus = this.isPlayer && this.energyRechargeBonus ? (1 + this.energyRechargeBonus) : 1;
     this.energy = Math.min(this.def.maxEnergy, this.energy + this.def.energyRegen * rechargeBonus);
@@ -1788,8 +1791,8 @@ class Ship {
           const d = dist(z.x, z.y, target.x, target.y);
           if (d < 200) {
             const a = Math.atan2(target.y - z.y, target.x - z.x);
-            projectiles.push({ x: z.x, y: z.y, vx: Math.cos(a) * 8, vy: Math.sin(a) * 8, damage: 1, owner: this, color: '#aaccff', size: 2, life: 25 });
-            z.fireTimer = 20;
+            projectiles.push({ x: z.x, y: z.y, vx: Math.cos(a) * 10, vy: Math.sin(a) * 10, damage: 2, owner: this, color: '#aaccff', size: 2, life: 25, isBeam: true });
+            z.fireTimer = 12; // SC2: ZapSats fire rapidly
           }
         }
       }
@@ -1820,6 +1823,9 @@ class Ship {
     this.energy -= this.def.weapon.cost;
     const w = this.def.weapon;
     const nx = Math.cos(this.angle - Math.PI/2), ny = Math.sin(this.angle - Math.PI/2);
+    // SC2-style muzzle flash on fire
+    particles.push(new Particle(this.x + nx * 12, this.y + ny * 12, nx * 0.5, ny * 0.5, w.color, 4, 'glow'));
+    particles.push(new Particle(this.x + nx * 12, this.y + ny * 12, 0, 0, '#fff', 3, 'spark'));
 
     if (w.type === 'spread') {
       for (let i = -1; i <= 1; i++) {
@@ -1991,15 +1997,20 @@ class Ship {
       this.specialCooldown = sp.duration + 20;
       sfx.shield();
     } else if (sp.name === 'Cloak') {
-      // Ilwrath cloaking device
+      // SC2 Ilwrath cloaking — ship becomes invisible to enemy (AI won't track)
       this.shieldTimer = sp.duration;
+      this.cloaked = true;
       this.specialCooldown = sp.duration + 60;
       sfx.warp();
     } else if (sp.name === 'Limpet') {
-      // VUX limpet - slows enemy
+      // SC2 VUX Limpet — permanently reduces enemy max speed (stacks!)
       const target = this.isPlayer ? enemyShip : playerShip;
       target.vx *= 0.3; target.vy *= 0.3;
+      target.def = { ...target.def, maxSpeed: Math.max(1, target.def.maxSpeed - 0.5) };
+      target.def.turnSpeed = Math.max(0.02, target.def.turnSpeed - 0.005);
       spawnParticles(target.x, target.y, '#44ff88', 8, 2);
+      gameMessage = 'Limpet attached! Speed reduced!';
+      messageTimer = 30;
       this.specialCooldown = 90;
       sfx.alarm();
     } else if (sp.name === 'Furnace') {
@@ -2050,13 +2061,18 @@ class Ship {
       this.specialCooldown = 120;
       sfx.shield();
     } else if (sp.name === 'Glory') {
-      // Shofixti glory device - massive self-destruct bomb
-      const target = this.isPlayer ? enemyShip : playerShip;
-      const d = dist(this.x, this.y, target.x, target.y);
-      if (d < 100) {
-        const dmg = Math.max(1, Math.floor(12 - d / 10));
-        target.takeDamage(dmg);
+      // SC2 Shofixti Glory Device — massive self-destruct damages EVERYTHING nearby
+      // Damages both playerShip and enemyShip based on distance
+      for (const target of [playerShip, enemyShip]) {
+        if (target === this || !target.alive) continue;
+        const d = dist(this.x, this.y, target.x, target.y);
+        if (d < 150) {
+          const dmg = Math.max(1, Math.floor(16 - d / 10));
+          target.takeDamage(dmg);
+        }
       }
+      // Massive screen shake and explosion
+      screenShake = 15;
       this.crew = 0; this.alive = false;
       spawnParticles(this.x, this.y, '#ffff44', 14, 4);
       spawnParticles(this.x, this.y, '#ff8844', 8, 3);
@@ -2069,16 +2085,20 @@ class Ship {
         // SC2 Yehat: shield absorbs hit but costs energy
         this.energy = Math.max(0, this.energy - dmg * 4);
         if (this.energy <= 0) this.shieldTimer = 0;
-        spawnParticles(this.x, this.y, '#4488ff', 4, 2);
+        // Shield impact flare
+        spawnParticles(this.x, this.y, '#4488ff', 6, 3);
+        particles.push(new Particle(this.x, this.y, 0, 0, '#ffffff', 5, 'ring'));
       } else if (this.def.special && this.def.special.name === 'Absorb') {
         // SC2 Utwig: absorb shield GAINS energy from incoming fire!
         this.energy = Math.min(this.def.maxEnergy, this.energy + dmg * 5);
-        spawnParticles(this.x, this.y, '#ffcc44', 6, 2);
+        // Golden absorb flash
+        spawnParticles(this.x, this.y, '#ffcc44', 8, 3);
+        particles.push(new Particle(this.x, this.y, 0, 0, '#ffee88', 6, 'ring'));
       } else {
         this.shieldTimer = Math.max(0, this.shieldTimer - 10);
         spawnParticles(this.x, this.y, '#4488ff', 4, 2);
       }
-      sfx.hit();
+      sfx.hit(); screenShake = 2;
       return;
     }
     this.crew -= dmg;
@@ -2089,7 +2109,7 @@ class Ship {
       if (this.pkunkResurrect && Math.random() < 0.5) {
         this.crew = this.def.maxCrew;
         this.energy = this.def.maxEnergy;
-        this.pkunkResurrect = false; // only once per activation
+        // SC2: Pkunk can resurrect multiple times — each time has 50% chance
         spawnParticles(this.x, this.y, '#ffffff', 20, 4);
         spawnParticles(this.x, this.y, '#66aaff', 15, 3);
         gameMessage = 'Pkunk RESURRECTS!';
@@ -2113,9 +2133,14 @@ class Ship {
     ctx.save();
     ctx.translate(this.x - cx, this.y - cy);
     ctx.rotate(this.angle);
+    // SC2 Ilwrath cloak — nearly invisible (only player can see faint shimmer)
+    if (this.cloaked && this.shieldTimer > 0) {
+      ctx.globalAlpha = this.isPlayer ? 0.15 : 0.04; // player sees own cloak better
+    }
     this.def.draw(this);
+    if (this.cloaked && this.shieldTimer > 0) ctx.globalAlpha = 1;
     // SC2-style generic shield glow (for ships without custom shield draw)
-    if (this.shieldTimer > 0) {
+    if (this.shieldTimer > 0 && !this.cloaked) {
       const pulse = Math.sin(frame * 0.3) * 0.15;
       ctx.globalAlpha = 0.25 + pulse;
       ctx.strokeStyle = this.def.color;
@@ -2135,6 +2160,14 @@ class Ship {
 let screenShake = 0;
 
 function updateAI(ship, target) {
+  // SC2: Cloaked ships can't be targeted — AI wanders randomly
+  if (target.cloaked && target.shieldTimer > 0) {
+    // Can't see target — wander randomly
+    if (Math.random() < 0.02) ship.turnLeft();
+    else if (Math.random() < 0.02) ship.turnRight();
+    if (Math.random() < 0.05) ship.thrustForward();
+    return;
+  }
   const dx = target.x - ship.x, dy = target.y - ship.y;
   const d = dist(ship.x, ship.y, target.x, target.y);
   const targetAngle = Math.atan2(dy, dx) + Math.PI / 2;
@@ -5357,7 +5390,9 @@ function updateDialogue() {
           state = 'fleetselect'; fleetCursor = 0; sfx.confirm();
         } else {
           state = 'combat'; initCombat(combatEnemy);
-          music.play('combat');
+          // SC2: boss-tier enemies get menacing theme
+          const bossRaces = ['kohrah', 'orz', 'urquan', 'mycon'];
+          music.play(bossRaces.includes(combatEnemy) ? 'boss' : 'combat');
         }
       } else if (act === 'buy_quest') {
         // Buy a quest item
@@ -6106,6 +6141,11 @@ function updateCombat() {
       p.vy += Math.sin(a) * 0.15;
       const spd = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
       if (spd > 6) { p.vx *= 6/spd; p.vy *= 6/spd; }
+    }
+    // SC2 Mycon plasmoid — grows larger as it travels (homing + size increase)
+    if (p.homing && p.size >= 4 && !p.isMarine) {
+      p.size = Math.min(8, p.size + 0.02); // slowly grows
+      p.damage = Math.min(6, Math.floor(p.size)); // damage scales with size
     }
     // Kohr-Ah FRIED boomerang
     if (p.isFRIED) {
