@@ -4887,6 +4887,28 @@ function drawStarbase() {
     }
   }
 
+  // === FLEET ROSTER (SC2 showed all your ships) ===
+  if (fleet.length > 1) {
+    const fy = 196;
+    ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
+    ctx.fillText('FLEET', menuX + menuW / 2, fy);
+    ctx.textAlign = 'left';
+    for (let fi = 0; fi < fleet.length; fi++) {
+      const fDef = SHIP_TYPES[fleet[fi]];
+      if (!fDef) continue;
+      const fx = menuX + 8 + (fi % 5) * 32;
+      const ffy = fy + 4 + Math.floor(fi / 5) * 18;
+      // Ship icon
+      ctx.save(); ctx.translate(fx + 8, ffy + 8); ctx.scale(0.35, 0.35);
+      fDef.draw({ flash: 0, thrusting: false, def: fDef, shieldTimer: 0 });
+      ctx.restore();
+      // Ship race label
+      ctx.fillStyle = fDef.color; ctx.font = '4px monospace';
+      ctx.fillText(fDef.race.substring(0, 5), fx, ffy + 18);
+    }
+    ctx.textAlign = 'center';
+  }
+
   // Controls help
   ctx.fillStyle = '#445566'; ctx.font = '7px monospace';
   ctx.fillText('UP/DOWN select  SPACE choose  Q leave', menuX + menuW / 2, H - 4);
@@ -5390,9 +5412,7 @@ function updateDialogue() {
           state = 'fleetselect'; fleetCursor = 0; sfx.confirm();
         } else {
           state = 'combat'; initCombat(combatEnemy);
-          // SC2: boss-tier enemies get menacing theme
-          const bossRaces = ['kohrah', 'orz', 'urquan', 'mycon'];
-          music.play(bossRaces.includes(combatEnemy) ? 'boss' : 'combat');
+          music.play('combat');
         }
       } else if (act === 'buy_quest') {
         // Buy a quest item
