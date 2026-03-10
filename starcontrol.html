@@ -390,6 +390,152 @@ let currentStarIdx;
 let fleet; // array of ship type keys e.g. ['player', 'spathi', 'pkunk']
 let fleetCursor;
 
+// ==================== SC2 QUEST SYSTEM ====================
+// Mirrors SC2's narrative structure: find allies, gather artifacts, stop the Kohr-Ah
+let questFlags = {};
+const QUEST_DEFS = {
+  // Main quest line
+  main_start:       { desc: 'Return to Sol Starbase', done: () => questFlags.visited_starbase },
+  find_allies:      { desc: 'Find allies against the Ur-Quan (0/5)', done: () => (questFlags.allies_found || 0) >= 5,
+                      progress: () => `Find allies (${questFlags.allies_found || 0}/5)` },
+  get_seals:        { desc: 'Collect 3 Precursor Seals', done: () => artifacts >= 3,
+                      progress: () => `Collect Precursor Seals (${artifacts}/3)` },
+  find_bomb:        { desc: 'Find the Precursor Bomb at the Seal convergence', done: () => questFlags.has_bomb },
+  destroy_samatra:  { desc: 'Destroy the Sa-Matra', done: () => questFlags.samatra_destroyed },
+  // Side quests (SC2-authentic)
+  shofixti_revival: { desc: 'Help the Shofixti rebuild', done: () => questFlags.shofixti_revived },
+  yehat_rebellion:  { desc: 'Trigger the Yehat civil war', done: () => questFlags.yehat_rebelled },
+  pkunk_migration:  { desc: 'Guide the Pkunk to safety', done: () => questFlags.pkunk_safe },
+  mycon_eggcase:    { desc: 'Retrieve the Mycon Sun Device', done: () => questFlags.sun_device },
+  chmmr_awaken:     { desc: 'Awaken the Chmmr from their Process', done: () => questFlags.chmmr_awakened },
+  utwig_ultron:     { desc: 'Repair the Ultron for the Utwig', done: () => questFlags.ultron_repaired },
+  syreen_vault:     { desc: 'Help Syreen recover their Vault', done: () => questFlags.syreen_vault },
+  arilou_secret:    { desc: 'Learn the Arilou\'s secret', done: () => questFlags.arilou_secret },
+};
+
+function getActiveQuests() {
+  const active = [];
+  // Main quests in order
+  if (!questFlags.visited_starbase) active.push(QUEST_DEFS.main_start);
+  else if ((questFlags.allies_found || 0) < 5 || artifacts < 3) {
+    if ((questFlags.allies_found || 0) < 5) active.push(QUEST_DEFS.find_allies);
+    if (artifacts < 3) active.push(QUEST_DEFS.get_seals);
+  } else if (!questFlags.has_bomb) active.push(QUEST_DEFS.find_bomb);
+  else if (!questFlags.samatra_destroyed) active.push(QUEST_DEFS.destroy_samatra);
+  // Side quests (show if relevant)
+  for (const [key, q] of Object.entries(QUEST_DEFS)) {
+    if (key.startsWith('main_') || key === 'find_allies' || key === 'get_seals' || key === 'find_bomb' || key === 'destroy_samatra') continue;
+    if (!q.done() && questFlags['quest_known_' + key]) active.push(q);
+  }
+  return active;
+}
+
+// Dynamic dialogue based on quest state (SC2's story-reactive conversations)
+function getQuestGreeting(race) {
+  const af = questFlags.allies_found || 0;
+  const marchPct = gameClock / DEATH_MARCH_TIME;
+  // Race-specific quest greetings
+  if (race === 'shofixti') {
+    if (!questFlags.shofixti_revived) {
+      questFlags.quest_known_shofixti_revival = true;
+      return 'I am Tanaka, last warrior of the Shofixti. My people sacrificed our sun to stop the Ur-Quan. I am alone. If you could find Shofixti females from the Mycon deep children worlds, perhaps... our species could be reborn.';
+    }
+    return 'KYAIII! The Shofixti are reborn! Our warriors stand ready, Captain! Glory and honor!';
+  }
+  if (race === 'yehat') {
+    if (!questFlags.yehat_rebelled) {
+      questFlags.quest_known_yehat_rebellion = true;
+      return 'We are the Yehat Starship Clans. Our Queen surrendered to the Ur-Quan without a fight. Many clans are FURIOUS. If you showed us that the Shofixti survived... it might trigger a rebellion against the throne.';
+    }
+    return 'The Revolution succeeds! Free Yehat clans now fight alongside you, Captain! KREEAH!';
+  }
+  if (race === 'syreen') {
+    if (!questFlags.syreen_vault) {
+      questFlags.quest_known_syreen_vault = true;
+      return 'Captain... I am Talana of the Syreen. The Mycon destroyed our homeworld, Syra. We have discovered they hide captured Syreen ships in a vault. Help us recover them, and we will join your cause.';
+    }
+    return 'The Syreen fleet is restored, Captain. Our Penetrators fly once more. We stand with you.';
+  }
+  if (race === 'chmmr') {
+    if (!questFlags.chmmr_awakened) {
+      questFlags.quest_known_chmmr_awaken = true;
+      return 'We... are the Chmmr. Our Process is incomplete. We merged Chenjesu and Mmrnmhrm but need the Sun Device from Mycon space to complete our transformation. Help us, and the full power of the Chmmr Avatar will be yours.';
+    }
+    return 'The Process is COMPLETE. We are fully awakened. The Chmmr Avatar is the most powerful ship in this region of space. Use us well, Captain.';
+  }
+  if (race === 'utwig') {
+    if (!questFlags.ultron_repaired) {
+      questFlags.quest_known_utwig_ultron = true;
+      return '*sob* We are the Utwig. Our Ultron, the sacred device that gave our existence meaning, is BROKEN. The Druuge traded us a defective one. If you could find the parts to repair it... we would be forever grateful.';
+    }
+    return 'The Ultron SHINES once more! Joy beyond measure! The Utwig Jugger stands ready at your command!';
+  }
+  if (race === 'arilou') {
+    if (!questFlags.arilou_secret) {
+      questFlags.quest_known_arilou_secret = true;
+      return 'We are the Arilou Lalee\'lay. We have watched your species for millennia. The *Them* — the things beyond — they have noticed humanity. The Orz are merely their *fingers*. We shielded you, but the rift weakens our protection. Find the Seals, human. Time grows short.';
+    }
+    return 'You know the truth now. The Arilou will fight beside you when the final battle comes.';
+  }
+  if (race === 'kohrah' && marchPct > 0.5) {
+    return 'THE CLEANSING HAS BEGUN! All non-Ur-Quan life will be purified! Your pathetic Alliance cannot stop the Eternal Doctrine! SUBMIT TO ANNIHILATION!';
+  }
+  if (race === 'orz' && artifacts >= 2) {
+    return '*Nervous*! You have the *toys*! If you use them to close the *opening*, Orz cannot *play* anymore! Orz does not want that! Maybe Orz should *pull* you *below* instead!';
+  }
+  if (race === 'urquan' && af >= 3) {
+    return 'You have gathered allies, Human. Impressive. The Kzer-Za recognize strength. Perhaps... an arrangement could be made. The Kohr-Ah threaten us ALL. Even Ur-Quan.';
+  }
+  // Generic quest-progression greetings
+  if (marchPct > 0.75) {
+    const d = DIALOGUES[race];
+    if (d) return d.hostile || d.greeting;
+  }
+  return null; // use default
+}
+
+// Get extra quest-specific dialogue choices for a race
+function getQuestChoices(race) {
+  const extra = [];
+  if (race === 'mycon' && !questFlags.sun_device && questFlags.quest_known_chmmr_awaken) {
+    extra.push({ text: 'We need the Sun Device for the Chmmr.', response: 'THE SUN DEVICE?! It is sacred to the Deep Children! You want it? TAKE IT FROM OUR COLD, FUNGAL BODIES!', action: 'fight_quest', quest: 'sun_device' });
+  }
+  if (race === 'mycon' && !questFlags.shofixti_revived && questFlags.quest_known_shofixti_revival) {
+    extra.push({ text: 'Do you hold Shofixti survivors?', response: 'SHOFIXTI? Those small angry ones? Some may exist in our deep child world incubators. If you defeat us, search the planets...', action: 'fight_quest', quest: 'shofixti_females' });
+  }
+  if (race === 'druuge' && !questFlags.ultron_repaired && questFlags.quest_known_utwig_ultron) {
+    extra.push({ text: 'We need Ultron repair parts.', response: 'Ah yes, the Ultron! We may have sold them a... slightly defective model. The replacement parts? 80 minerals. A BARGAIN!', action: 'buy_quest', quest: 'ultron_parts', cost: 80 });
+  }
+  if (race === 'yehat' && questFlags.shofixti_revived && !questFlags.yehat_rebelled) {
+    extra.push({ text: 'The Shofixti LIVE! Look!', response: 'The... the Shofixti? ALIVE?! IMPOSSIBLE! But... but this means... THE QUEEN WAS WRONG TO SURRENDER! CLANS! TO ARMS! THE REVOLUTION BEGINS! KREEAAAAH!', action: 'trigger_quest', quest: 'yehat_rebellion' });
+  }
+  if (race === 'shofixti' && questFlags.shofixti_females && !questFlags.shofixti_revived) {
+    extra.push({ text: 'We found Shofixti survivors!', response: 'You... you found our females?! The Shofixti can be REBORN! KYAIIII! Honor beyond honor! I pledge my blade and my people to your cause FOREVER!', action: 'trigger_quest', quest: 'shofixti_revival' });
+  }
+  if (race === 'syreen' && !questFlags.syreen_vault) {
+    extra.push({ text: 'Let\'s raid the Mycon vault together.', response: 'Yes! If you have defeated the Mycon near the vault world, we can recover our ships. The Syreen Penetrators will fly again!', action: 'trigger_quest', quest: 'syreen_vault' });
+  }
+  if (race === 'arilou' && !questFlags.arilou_secret) {
+    extra.push({ text: 'Tell me about *Them*.', response: 'The beings beyond your dimension have always been there. They are vast and hungry. The Orz are but one projection. The Arilou have hidden humanity from *Them* for eons. But the rift... it draws their attention. The Seals are your only hope. We will join you — an Arilou Skiff for your fleet.', action: 'ally_quest', quest: 'arilou_secret' });
+  }
+  return extra;
+}
+
+function checkQuestTriggers() {
+  // Auto-detect alliance count
+  const allyRaces = fleet.filter(f => f !== 'player');
+  questFlags.allies_found = allyRaces.length;
+  // Bomb assembly: 3 seals + visited bomb site
+  if (artifacts >= 3 && !questFlags.has_bomb) {
+    // Player needs to visit a specific location — mark it available
+    questFlags.bomb_available = true;
+  }
+  // Kohr-Ah Death March progress
+  if (gameClock > 0) {
+    questFlags.death_march_progress = Math.min(1, gameClock / DEATH_MARCH_TIME);
+  }
+}
+
 // QuasiSpace (SC2's green dimension with portal shortcuts)
 let inQuasiSpace;
 let quasiX, quasiY, quasiVX, quasiVY, quasiAngle;
@@ -2191,13 +2337,13 @@ function generateStarMap() {
   }
 
   let starIdx = 0;
-  // Generate 6 stars per territory + many neutral stars for a bigger galaxy (SC2 had 500+)
+  // Generate 8 stars per territory + many neutral stars for a bigger galaxy (SC2 had 500+)
   for (let ti = 0; ti < territories.length; ti++) {
     const t = territories[ti];
     const constel = constellations[ti];
-    for (let si = 0; si < 6; si++) {
+    for (let si = 0; si < 8; si++) {
       // Cluster stars around territory center with some spread
-      const angle = (si / 3) * TAU + Math.random() * 0.8;
+      const angle = (si / 4) * TAU + Math.random() * 0.8;
       const radius = 80 + Math.random() * 120;
       const x = t.cx + Math.cos(angle) * radius;
       const y = t.cy + Math.sin(angle) * radius;
@@ -2209,15 +2355,15 @@ function generateStarMap() {
       starMap.push({
         x, y, name: sName, color: col, type: 'normal',
         planets: makePlanets(greekNames[starIdx % greekNames.length], numPlanets),
-        alien: si < 2 ? t.race : null, // Only first 2 stars per territory have aliens
+        alien: si < 3 ? t.race : null, // First 3 stars per territory have alien encounters
         territory: t.race,
         artifact: hasArtifact, visited: false,
       });
       starIdx++;
     }
   }
-  // Add 150 neutral/unowned stars scattered across the map (SC2 had 500+ total)
-  for (let ni = 0; ni < 150; ni++) {
+  // Add 350 neutral/unowned stars scattered across the map (SC2 had 500+ total)
+  for (let ni = 0; ni < 350; ni++) {
     let x, y, attempts = 0;
     do {
       x = (Math.random() - 0.5) * MAP_SIZE;
@@ -2475,6 +2621,7 @@ function initGame() {
   visitedStars = new Set([0]);
   defeatedAliens = new Set();
   currentStarIdx = 0;
+  questFlags = { visited_starbase: false, allies_found: 0 };
   generateStarMap();
   // HyperSpace — player starts at Sol
   hyperX = 0; hyperY = 0; hyperVX = 0; hyperVY = 0;
@@ -2502,7 +2649,7 @@ function saveGame() {
       fleet: [...fleet],
       visitedStars: [...visitedStars],
       defeatedAliens: [...defeatedAliens],
-      currentStarIdx,
+      currentStarIdx, questFlags: { ...questFlags },
       hyperX, hyperY, hyperAngle,
       inQuasiSpace, quasiX, quasiY, quasiAngle,
       gameClock, deathMarchWarning, mapZoom,
@@ -2542,6 +2689,7 @@ function loadGame() {
     gameClock = save.gameClock || 0;
     deathMarchWarning = save.deathMarchWarning || 0;
     mapZoom = save.mapZoom || 0.2;
+    questFlags = save.questFlags || {};
     starMap = save.starMap;
     mapCamX = hyperX; mapCamY = hyperY;
     selectedStar = null;
@@ -3596,7 +3744,8 @@ function updateMap() {
     sfx.warp();
     if (s.alien && !defeatedAliens.has(selectedStar)) {
       state = 'dialogue';
-      dialogue = { race: s.alien, stage: 'greeting', text: DIALOGUES[s.alien].greeting, starIdx: selectedStar };
+      const greetText = getQuestGreeting(s.alien) || DIALOGUES[s.alien].greeting;
+      dialogue = { race: s.alien, stage: 'greeting', text: greetText, starIdx: selectedStar };
       dialogueChoice = 0;
     } else {
       if (selectedStar === 0) { state = 'starbase'; starbaseCursor = 0; starbaseMsg = null; music.play('starbase'); }
@@ -3648,7 +3797,7 @@ function updateMap() {
     if (inTerritory && Math.random() < 0.3) {
       // Random encounter!
       state = 'dialogue';
-      dialogue = { race: inTerritory, stage: 'greeting', text: DIALOGUES[inTerritory].greeting, starIdx: -1 };
+      dialogue = { race: inTerritory, stage: 'greeting', text: getQuestGreeting(inTerritory) || DIALOGUES[inTerritory].greeting, starIdx: -1 };
       dialogueChoice = 0;
       gameMessage = `${SHIP_TYPES[inTerritory].race} patrol intercepts you!`;
       messageTimer = 90;
@@ -4173,10 +4322,53 @@ function drawMap() {
     }
   }
 
+  // === QUEST LOG (top-right, SC2 style objectives) ===
+  checkQuestTriggers();
+  const quests = getActiveQuests();
+  if (quests.length > 0) {
+    const qlX = W - 110, qlY = 24;
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#04041a';
+    ctx.fillRect(qlX - 2, qlY - 8, 112, quests.length * 10 + 12);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#334488'; ctx.lineWidth = 1;
+    ctx.strokeRect(qlX - 2, qlY - 8, 112, quests.length * 10 + 12);
+    ctx.fillStyle = '#6688bb'; ctx.font = 'bold 6px monospace';
+    ctx.fillText('OBJECTIVES', qlX, qlY);
+    for (let qi = 0; qi < Math.min(quests.length, 4); qi++) {
+      const q = quests[qi];
+      ctx.fillStyle = '#aaccdd'; ctx.font = '6px monospace';
+      ctx.fillText('► ' + (q.progress ? q.progress() : q.desc), qlX, qlY + 10 + qi * 10);
+    }
+  }
+
+  // === KOHR-AH DEATH MARCH (visible cleansing wave on map) ===
+  if (gameClock > DEATH_MARCH_TIME * 0.3) {
+    const marchFrac = Math.min(1, (gameClock - DEATH_MARCH_TIME * 0.3) / (DEATH_MARCH_TIME * 0.7));
+    // Expanding red circle from Kohr-Ah territory (top-right of galaxy)
+    const marchCX = 700, marchCY = -600; // Kohr-Ah home
+    const marchRadius = marchFrac * 1200 * mapZoom;
+    const msx = W / 2 + (marchCX - mapCamX) * mapZoom;
+    const msy = mapH / 2 + (marchCY - mapCamY) * mapZoom;
+    ctx.globalAlpha = 0.08 + Math.sin(frame * 0.03) * 0.03;
+    ctx.fillStyle = '#ff0000';
+    ctx.beginPath(); ctx.arc(msx, msy, marchRadius, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = '#ff4444'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(msx, msy, marchRadius, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+    // "DEATH MARCH" label if visible
+    if (marchFrac > 0.1) {
+      ctx.fillStyle = Math.floor(frame / 20) % 2 ? '#ff2222' : '#881111';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText('KOHR-AH CLEANSING', msx - 45, msy - marchRadius - 5);
+    }
+  }
+
   // Autopilot hint
   if (selectedStar !== null) {
     ctx.fillStyle = '#334466'; ctx.font = '6px monospace';
-    ctx.fillText('A=auto +/-=zoom', 218, mapH + 35 - (artifacts > 0 ? 0 : 10));
+    ctx.fillText('A=auto +/-=zoom L=log', 218, mapH + 35 - (artifacts > 0 ? 0 : 10));
   }
 
   // Message overlay
@@ -4353,11 +4545,29 @@ const HAYES_MSGS = [
 ];
 
 function getHayesMsg() {
-  if (artifacts >= 3) return 'Captain! You have all three Precursor Seals! Find the Orz and seal the dimensional rift! The Alliance is counting on you!';
-  if (artifacts === 2) return 'Two Seals found, Captain! One more to go. Our long-range sensors detect Orz activity increasing. We must hurry!';
-  if (artifacts === 1) return 'Good work finding that Seal, Captain. Two more remain. The Chmmr say the rift is growing wider. Be careful out there.';
-  if (defeatedAliens.size > 3) return 'You have made contact with several species, Captain. Keep exploring. The Precursor Seals are hidden at the edges of the galaxy.';
-  return 'Welcome back, Captain. Since the Sa-Matra was destroyed, a dimensional rift has opened. We need you to find three Precursor Seals to close it. Talk to the alien races - they may have information. The Starbase will always be here if you need fuel or crew.';
+  questFlags.visited_starbase = true;
+  const marchPct = gameClock / DEATH_MARCH_TIME;
+  // Bomb assembled — go fight!
+  if (questFlags.has_bomb) return 'Captain! The Precursor Bomb is ready! Fly to the Kohr-Ah homeworld and use it to destroy the Sa-Matra! This is our last chance! The fate of the galaxy rests with you!';
+  // All 3 seals + enough allies = can assemble bomb
+  if (artifacts >= 3 && (questFlags.allies_found || 0) >= 3) {
+    questFlags.has_bomb = true;
+    return 'Captain! You have all three Precursor Seals AND enough allies! Commander Hayes has assembled the Precursor Bomb! Now fly to the Kohr-Ah homeworld and DESTROY THE SA-MATRA! GO!';
+  }
+  if (artifacts >= 3) return 'All three Seals collected! But we need more allies to assault the Sa-Matra. Recruit at least 3 races to your fleet, Captain!';
+  // Death March urgency
+  if (marchPct > 0.75) return 'CAPTAIN! The Kohr-Ah Death March is nearly complete! They are CLEANSING entire sectors! We are running out of TIME! Find the remaining Seals!';
+  if (marchPct > 0.5) return 'The situation is dire, Captain. The Kohr-Ah have begun their cleansing sweep. We MUST find the Seals before all is lost.';
+  // Quest-specific hints
+  if (questFlags.sun_device && !questFlags.chmmr_awakened) return 'Captain, you have the Sun Device! Take it to the Chmmr — they need it to complete their Process!';
+  if (questFlags.shofixti_females && !questFlags.shofixti_revived) return 'You found Shofixti survivors! Return to Tanaka in Shofixti space — this will change everything!';
+  if (questFlags.ultron_parts && !questFlags.ultron_repaired) return 'You have the Ultron parts! Bring them to the Utwig — they will be eternally grateful!';
+  // Progress-based messages
+  if (artifacts === 2) return 'Two Seals found, Captain! One more to go. Our sensors detect Orz activity increasing. The Arilou may know more about the threat. Have you spoken with the Chmmr about the Sun Device?';
+  if (artifacts === 1) return 'Good work finding that Seal! Two remain. Talk to the alien races — the Mycon hold secrets, the Shofixti need help, and the Yehat may yet be swayed. The Melnorme can sell you valuable intel.';
+  if ((questFlags.allies_found || 0) > 0) return `You have ${questFlags.allies_found} allies. Good start. Keep exploring for Precursor Seals — they are guarded by hostile races at the edges of the galaxy. Talk to every species you meet!`;
+  if (defeatedAliens.size > 3) return 'You have made contact with several species, Captain. Keep exploring. The Precursor Seals are hidden at the edges of the galaxy. The Chmmr and Arilou may have crucial information.';
+  return 'Welcome back, Captain. The Sa-Matra is destroyed, but a dimensional rift has opened. The Kohr-Ah have begun a Death March to cleanse all life. You must find three Precursor Seals to stop them. Talk to alien races for clues. The Starbase will always be here for fuel and crew.';
 }
 
 function updateStarbase() {
@@ -4988,7 +5198,9 @@ function drawOrbit() {
 function updateDialogue() {
   const d = DIALOGUES[dialogue.race];
   if (dialogue.stage === 'greeting') {
-    const choices = d.choices;
+    // Merge base choices with quest-specific choices
+    const questExtra = getQuestChoices(dialogue.race);
+    const choices = [...questExtra, ...d.choices];
     if (justPressed['ArrowUp'] || justPressed['KeyW']) { dialogueChoice = (dialogueChoice - 1 + choices.length) % choices.length; sfx.select(); }
     if (justPressed['ArrowDown'] || justPressed['KeyS']) { dialogueChoice = (dialogueChoice + 1) % choices.length; sfx.select(); }
     if (justPressed['Space'] || justPressed['Enter']) {
@@ -4998,6 +5210,7 @@ function updateDialogue() {
       dialogue.action = choice.action;
       dialogue.cost = choice.cost;
       dialogue.give = choice.give;
+      dialogue.quest = choice.quest;
       sfx.confirm();
     }
   } else if (dialogue.stage === 'response') {
@@ -5136,6 +5349,46 @@ function updateDialogue() {
         sfx.warp();
       } else if (act === 'flee') {
         returnToHyperSpace(); sfx.warp();
+      } else if (act === 'fight_quest') {
+        // Quest-triggered fight — set quest flag on victory
+        window._pendingQuest = dialogue.quest;
+        combatEnemy = dialogue.race;
+        if (fleet.length > 1) {
+          state = 'fleetselect'; fleetCursor = 0; sfx.confirm();
+        } else {
+          state = 'combat'; initCombat(combatEnemy);
+          music.play('combat');
+        }
+      } else if (act === 'buy_quest') {
+        // Buy a quest item
+        if (minerals >= (dialogue.cost || 0)) {
+          minerals -= dialogue.cost;
+          questFlags[dialogue.quest] = true;
+          gameMessage = 'Acquired quest item!';
+          messageTimer = 120; sfx.victory();
+        } else {
+          gameMessage = 'Not enough minerals!';
+          messageTimer = 60;
+        }
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'trigger_quest') {
+        // Instantly complete a quest
+        const q = dialogue.quest;
+        if (q === 'yehat_rebellion') { questFlags.yehat_rebelled = true; if (!fleet.includes('yehat')) fleet.push('yehat'); }
+        else if (q === 'shofixti_revival') { questFlags.shofixti_revived = true; if (!fleet.includes('shofixti')) fleet.push('shofixti'); }
+        else if (q === 'syreen_vault') { questFlags.syreen_vault = true; if (!fleet.includes('syreen')) fleet.push('syreen'); }
+        else questFlags[q] = true;
+        gameMessage = 'Quest completed!';
+        messageTimer = 120; sfx.victory();
+        returnAfterDialogue(); sfx.confirm();
+      } else if (act === 'ally_quest') {
+        // Join fleet + set quest flag
+        const race = dialogue.race;
+        if (!fleet.includes(race)) fleet.push(race);
+        questFlags[dialogue.quest] = true;
+        gameMessage = `${SHIP_TYPES[race].race} joins your fleet! Quest updated!`;
+        messageTimer = 120; sfx.victory();
+        returnAfterDialogue(); sfx.confirm();
       } else {
         // info - just dismiss
         returnAfterDialogue(); sfx.confirm();
@@ -5255,7 +5508,8 @@ function drawDialogue() {
 
   // Choices or continue prompt
   if (dialogue.stage === 'greeting') {
-    const choices = d.choices;
+    const questExtra = getQuestChoices(dialogue.race);
+    const choices = [...questExtra, ...d.choices];
     const choiceY0 = Math.max(y + 16, portH * 0.45);
     // SC2 style: player responses in different color
     ctx.fillStyle = '#224488'; ctx.fillRect(textX, choiceY0 - 6, textW2, portH - choiceY0 + 6);
@@ -6032,8 +6286,19 @@ function updateCombat() {
     } else {
       defeatedAliens.add(dialogue ? dialogue.starIdx : -1);
       if (!playerShip.isAlly) crew = playerShip.crew;
-      // Check if this was the final boss
-      if (enemyShip.type === 'orz' && artifacts >= 3) {
+      // Quest completion on combat victory
+      if (window._pendingQuest) {
+        const pq = window._pendingQuest;
+        if (pq === 'sun_device') { questFlags.sun_device = true; }
+        else if (pq === 'shofixti_females') { questFlags.shofixti_females = true; }
+        else { questFlags[pq] = true; }
+        window._pendingQuest = null;
+      }
+      // Check if this was the final boss (Sa-Matra battle)
+      if (questFlags.has_bomb && (enemyShip.type === 'kohrah' || enemyShip.type === 'urquan') && artifacts >= 3) {
+        questFlags.samatra_destroyed = true;
+        setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 1000);
+      } else if (enemyShip.type === 'orz' && artifacts >= 3) {
         setTimeout(() => { state = 'victory'; music.stop(); sfx.victory(); }, 1000);
       } else {
         setTimeout(() => {
@@ -6043,6 +6308,9 @@ function updateCombat() {
           gameMessage = `${enemyShip.def.race} defeated! +50 minerals`;
           minerals += 50;
           messageTimer = 90;
+          // Quest victory message
+          if (questFlags.sun_device && !questFlags._sunMsg) { gameMessage += ' Got the Sun Device!'; questFlags._sunMsg = true; }
+          if (questFlags.shofixti_females && !questFlags._shofMsg) { gameMessage += ' Found Shofixti survivors!'; questFlags._shofMsg = true; }
         }, 800);
       }
     }
@@ -6565,16 +6833,32 @@ function drawVictory() {
   ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, 184, 120, 1);
 
   ctx.fillStyle = '#aaccdd'; ctx.font = '8px monospace';
-  ctx.fillText('The Alliance of Free Stars', W/2, 200);
-  ctx.fillText('endures. Humanity, Chmmr,', W/2, 212);
-  ctx.fillText('Yehat, and Syreen stand', W/2, 224);
-  ctx.fillText('united among the stars.', W/2, 236);
+  // Dynamic ending based on quests completed
+  const allies = fleet.filter(f => f !== 'player').map(f => SHIP_TYPES[f]?.race || f);
+  if (allies.length > 0) {
+    ctx.fillText('The Alliance of Free Stars', W/2, 200);
+    ctx.fillText('endures: ' + allies.slice(0, 3).join(', '), W/2, 212);
+    if (allies.length > 3) ctx.fillText('and ' + (allies.length - 3) + ' more races stand united.', W/2, 224);
+    else ctx.fillText('stand united among the stars.', W/2, 224);
+  } else {
+    ctx.fillText('Against all odds, a single', W/2, 200);
+    ctx.fillText('ship saved the galaxy.', W/2, 212);
+  }
+  // Quest achievements
+  let qy = 236;
+  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, qy, 120, 1); qy += 8;
+  ctx.fillStyle = '#88aa88'; ctx.font = '7px monospace';
+  if (questFlags.shofixti_revived) { ctx.fillText('✦ The Shofixti are reborn', W/2, qy); qy += 10; }
+  if (questFlags.yehat_rebelled) { ctx.fillText('✦ The Yehat clans are free', W/2, qy); qy += 10; }
+  if (questFlags.chmmr_awakened) { ctx.fillText('✦ The Chmmr Process completed', W/2, qy); qy += 10; }
+  if (questFlags.syreen_vault) { ctx.fillText('✦ Syreen fleet restored', W/2, qy); qy += 10; }
+  if (questFlags.arilou_secret) { ctx.fillText('✦ The Arilou secret revealed', W/2, qy); qy += 10; }
 
   // Fleet/stats summary
-  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, 243, 120, 1);
+  ctx.fillStyle = '#ddaa22'; ctx.fillRect(W/2 - 60, qy + 2, 120, 1); qy += 12;
   ctx.fillStyle = '#aabb88'; ctx.font = '7px monospace';
-  ctx.fillText(`Fleet: ${fleet.length} ships | Minerals: ${minerals} RU`, W/2, 256);
-  ctx.fillText(`Stars visited: ${visitedStars.size} | Modules: ${modules.length}`, W/2, 268);
+  ctx.fillText(`Fleet: ${fleet.length} ships | Minerals: ${minerals} RU`, W/2, qy); qy += 12;
+  ctx.fillText(`Stars visited: ${visitedStars.size} | Modules: ${modules.length}`, W/2, qy);
 
   ctx.fillStyle = '#667788'; ctx.font = '8px monospace';
   ctx.fillText('But somewhere in the void,', W/2, 288);
@@ -6710,46 +6994,95 @@ const MELEE_SHIPS = ['player','urquan','spathi','chmmr','zoqfotpik','orz','mycon
   'melnorme','kohrah','yehat','supox','utwig','thraddash','ilwrath','umgah','vux',
   'arilou','druuge','syreen','shofixti'];
 
+// SC2 Super Melee fleet arrays (team of ships per side)
+let meleeFleet1 = [], meleeFleet2 = [];
+let meleeFleetIdx1 = 0, meleeFleetIdx2 = 0;
+
 function updateMelee() {
   if (meleeState === 'pick1') {
     if (justPressed['ArrowUp'] || justPressed['KeyW']) { meleeCursor1 = (meleeCursor1 - 1 + MELEE_SHIPS.length) % MELEE_SHIPS.length; sfx.select(); }
     if (justPressed['ArrowDown'] || justPressed['KeyS']) { meleeCursor1 = (meleeCursor1 + 1) % MELEE_SHIPS.length; sfx.select(); }
     if (justPressed['Enter'] || justPressed['Space']) {
-      meleeP1 = MELEE_SHIPS[meleeCursor1];
+      // Add ship to fleet (up to 7)
+      if (meleeFleet1.length < 7) {
+        meleeFleet1.push(MELEE_SHIPS[meleeCursor1]);
+        sfx.confirm();
+      }
+    }
+    // Remove last ship with backspace
+    if (justPressed['Backspace'] && meleeFleet1.length > 0) { meleeFleet1.pop(); sfx.select(); }
+    // Done building fleet — move to P2
+    if (justPressed['KeyD'] && meleeFleet1.length > 0) {
       meleeState = 'pick2';
       sfx.confirm();
     }
-    if (justPressed['Escape']) { state = 'title'; sfx.select(); }
+    if (justPressed['Escape']) { state = 'title'; meleeFleet1 = []; sfx.select(); }
   } else if (meleeState === 'pick2') {
     if (justPressed['ArrowUp'] || justPressed['KeyW']) { meleeCursor2 = (meleeCursor2 - 1 + MELEE_SHIPS.length) % MELEE_SHIPS.length; sfx.select(); }
     if (justPressed['ArrowDown'] || justPressed['KeyS']) { meleeCursor2 = (meleeCursor2 + 1) % MELEE_SHIPS.length; sfx.select(); }
     if (justPressed['Enter'] || justPressed['Space']) {
-      meleeP2 = MELEE_SHIPS[meleeCursor2];
+      if (meleeFleet2.length < 7) {
+        meleeFleet2.push(MELEE_SHIPS[meleeCursor2]);
+        sfx.confirm();
+      }
+    }
+    if (justPressed['Backspace'] && meleeFleet2.length > 0) { meleeFleet2.pop(); sfx.select(); }
+    if (justPressed['KeyD'] && meleeFleet2.length > 0) {
+      // Start fleet battle!
       meleeState = 'fight';
-      // Start melee combat
-      initCombatAlly(meleeP1, meleeP2);
-      playerShip.isAlly = false; // player controls it directly in melee
+      meleeFleetIdx1 = 0; meleeFleetIdx2 = 0;
+      initCombatAlly(meleeFleet1[0], meleeFleet2[0]);
+      playerShip.isAlly = false;
       music.play('combat');
       sfx.confirm();
     }
-    if (justPressed['Escape']) { meleeState = 'pick1'; sfx.select(); }
+    if (justPressed['Escape']) { meleeState = 'pick1'; meleeFleet2 = []; sfx.select(); }
   } else if (meleeState === 'fight') {
     updateCombat();
-    // Check for winner
+    // Check for ship destruction
     if ((playerShip.crew <= 0 || enemyShip.crew <= 0) && !window._meleeEnd) {
       window._meleeEnd = frame;
       if (playerShip.crew <= 0) {
-        window._meleeWinner = SHIP_TYPES[meleeP2].race + ' ' + SHIP_TYPES[meleeP2].name + ' WINS!';
+        meleeFleetIdx1++;
+        if (meleeFleetIdx1 >= meleeFleet1.length) {
+          window._meleeWinner = 'PLAYER 2 WINS! (' + meleeFleet2.length + ' ships vs ' + meleeFleet1.length + ')';
+        } else {
+          window._meleeWinner = SHIP_TYPES[meleeFleet1[meleeFleetIdx1 - 1]]?.race + ' destroyed! Next ship...';
+          window._meleeNextShip = true;
+        }
       } else {
-        window._meleeWinner = SHIP_TYPES[meleeP1].race + ' ' + SHIP_TYPES[meleeP1].name + ' WINS!';
+        meleeFleetIdx2++;
+        if (meleeFleetIdx2 >= meleeFleet2.length) {
+          window._meleeWinner = 'PLAYER 1 WINS! (' + meleeFleet1.length + ' ships vs ' + meleeFleet2.length + ')';
+        } else {
+          window._meleeWinner = SHIP_TYPES[meleeFleet2[meleeFleetIdx2 - 1]]?.race + ' destroyed! Next ship...';
+          window._meleeNextShip = true;
+        }
       }
     }
-    if (window._meleeEnd && frame - window._meleeEnd > 120) {
-      window._meleeEnd = null;
-      window._meleeWinner = null;
-      meleeState = 'pick1';
-      music.stop();
-      projectiles = []; particles = [];
+    if (window._meleeEnd && frame - window._meleeEnd > 90) {
+      if (window._meleeNextShip) {
+        // Send in next ship
+        window._meleeEnd = null;
+        window._meleeWinner = null;
+        window._meleeNextShip = null;
+        const p1Ship = meleeFleet1[meleeFleetIdx1];
+        const p2Ship = meleeFleet2[meleeFleetIdx2];
+        if (p1Ship && p2Ship) {
+          initCombatAlly(p1Ship, p2Ship);
+          playerShip.isAlly = false;
+          projectiles = []; particles = [];
+        }
+      } else {
+        // Match over
+        window._meleeEnd = null;
+        window._meleeWinner = null;
+        meleeFleet1 = []; meleeFleet2 = [];
+        meleeFleetIdx1 = 0; meleeFleetIdx2 = 0;
+        meleeState = 'pick1';
+        music.stop();
+        projectiles = []; particles = [];
+      }
     }
   }
 }
@@ -6784,16 +7117,35 @@ function drawMelee() {
   ctx.font = 'bold 9px monospace';
   ctx.fillText(`SELECT SHIP: ${label}`, W / 2, 32);
 
-  // Already picked ship (if picking P2)
-  if (isPick2 && meleeP1) {
-    const p1Def = SHIP_TYPES[meleeP1];
-    ctx.fillStyle = '#223344'; ctx.fillRect(4, 4, 60, 26);
-    ctx.strokeStyle = '#4488ff'; ctx.strokeRect(4, 4, 60, 26);
-    ctx.fillStyle = p1Def.color; ctx.font = '7px monospace'; ctx.textAlign = 'left';
-    ctx.fillText('P1:', 8, 14);
-    ctx.fillText(p1Def.race, 8, 24);
-    ctx.textAlign = 'center';
+  // Fleet roster display (SC2 style — show selected ships)
+  const showFleet = isPick2 ? meleeFleet1 : meleeFleet1;
+  const buildFleet = isPick2 ? meleeFleet2 : meleeFleet1;
+  // P1 fleet (always shown)
+  ctx.fillStyle = '#112233'; ctx.fillRect(2, 2, 64, 12 + meleeFleet1.length * 8);
+  ctx.strokeStyle = '#4488ff'; ctx.strokeRect(2, 2, 64, 12 + meleeFleet1.length * 8);
+  ctx.fillStyle = '#4488ff'; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('P1 FLEET', 6, 10);
+  for (let fi = 0; fi < meleeFleet1.length; fi++) {
+    const fd = SHIP_TYPES[meleeFleet1[fi]];
+    ctx.fillStyle = fd.color; ctx.fillRect(6, 14 + fi * 8, 4, 4);
+    ctx.fillStyle = '#aabbcc'; ctx.font = '5px monospace';
+    ctx.fillText(fd.race.substring(0, 8), 12, 18 + fi * 8);
   }
+  // P2 fleet (if building)
+  if (isPick2) {
+    const p2y = 2;
+    ctx.fillStyle = '#221111'; ctx.fillRect(W - 66, p2y, 64, 12 + meleeFleet2.length * 8);
+    ctx.strokeStyle = '#ff8844'; ctx.strokeRect(W - 66, p2y, 64, 12 + meleeFleet2.length * 8);
+    ctx.fillStyle = '#ff8844'; ctx.font = 'bold 6px monospace';
+    ctx.fillText('P2 FLEET', W - 62, p2y + 8);
+    for (let fi = 0; fi < meleeFleet2.length; fi++) {
+      const fd = SHIP_TYPES[meleeFleet2[fi]];
+      ctx.fillStyle = fd.color; ctx.fillRect(W - 62, p2y + 12 + fi * 8, 4, 4);
+      ctx.fillStyle = '#ccbbaa'; ctx.font = '5px monospace';
+      ctx.fillText(fd.race.substring(0, 8), W - 56, p2y + 16 + fi * 8);
+    }
+  }
+  ctx.textAlign = 'center';
 
   // Ship list (two columns)
   const cols = 2;
@@ -6849,7 +7201,8 @@ function drawMelee() {
 
   ctx.textAlign = 'center';
   ctx.fillStyle = '#556677'; ctx.font = '7px monospace';
-  ctx.fillText('UP/DOWN select  ENTER pick  ESC back', W / 2, H - 2);
+  const buildCount = isPick2 ? meleeFleet2.length : meleeFleet1.length;
+  ctx.fillText(`ENTER=add ship (${buildCount}/7)  BKSP=remove  D=done  ESC=back`, W / 2, H - 2);
   ctx.textAlign = 'left';
 }
 
