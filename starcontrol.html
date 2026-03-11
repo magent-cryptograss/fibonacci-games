@@ -1585,8 +1585,13 @@ class Ship {
         this.vy += (dy / d) * g;
       }
       if (d < PLANET_RADIUS + 4) {
-        this.takeDamage(999);
-        spawnParticles(this.x, this.y, '#ff8844', 20, 4);
+        this.takeDamage(2);
+        // Bounce off the planet
+        const nx = (this.x - combatPlanet.x) / d, ny = (this.y - combatPlanet.y) / d;
+        this.x = combatPlanet.x + nx * (PLANET_RADIUS + 5);
+        this.y = combatPlanet.y + ny * (PLANET_RADIUS + 5);
+        this.vx = nx * 3; this.vy = ny * 3;
+        spawnParticles(this.x, this.y, '#ff8844', 10, 3);
       }
     }
 
