@@ -5456,39 +5456,47 @@ function initLander(planetIdx) {
   currentPlanetIdx = planetIdx;
   const s = starMap[currentStarIdx];
   const p = s.planets[planetIdx];
-  surfaceWidth = 640;
-  surfaceHeight = 200;
-  // Generate terrain height map (SC2 had scrolling terrain)
+  // SC2 lander: top-down scrolling surface, larger exploration area
+  surfaceWidth = 800;
+  surfaceHeight = 800;
+  // Generate top-down terrain texture map (1=ground, 2=mountain, 3=water/lava)
   surfaceTerrain = [];
-  const baseH = p.type === 'Rocky' ? 40 : p.type === 'Volcanic' ? 50 : p.type === 'Desert' ? 30 : p.type === 'Ice' ? 35 : 25;
-  for (let i = 0; i <= surfaceWidth; i++) {
-    const h = baseH + Math.sin(i * 0.02) * 15 + Math.sin(i * 0.05) * 8 + Math.sin(i * 0.13) * 4;
-    surfaceTerrain.push(Math.floor(h));
+  for (let y = 0; y < surfaceHeight; y++) {
+    surfaceTerrain[y] = [];
+    for (let x = 0; x < surfaceWidth; x++) {
+      const n1 = Math.sin(x * 0.015) * Math.cos(y * 0.012) * 0.4;
+      const n2 = Math.sin(x * 0.04 + 1.7) * Math.sin(y * 0.035 + 0.8) * 0.3;
+      const n3 = Math.sin(x * 0.08 + 3.1) * Math.cos(y * 0.07 + 2.4) * 0.15;
+      const h = n1 + n2 + n3;
+      surfaceTerrain[y][x] = h > 0.35 ? 2 : h < -0.3 ? 3 : 1;
+    }
   }
-  // Place mineral deposits on terrain
+  // Place mineral deposits scattered across surface
   surfaceDeposits = [];
-  for (const dep of p.deposits) {
-    const dx = Math.floor(dep.x / 640 * surfaceWidth);
-    const tx = clamp(dx, 5, surfaceWidth - 5);
+  for (let i = 0; i < p.deposits.length; i++) {
+    const dep = p.deposits[i];
+    const dx = 30 + Math.random() * (surfaceWidth - 60);
+    const dy = 30 + Math.random() * (surfaceHeight - 60);
     surfaceDeposits.push({
-      x: tx, y: surfaceHeight - surfaceTerrain[tx] - 2,
+      x: dx, y: dy,
       type: dep.type, collected: dep.collected,
-      origIdx: p.deposits.indexOf(dep),
+      origIdx: i,
     });
   }
   // Place biological lifeforms
   surfaceBio = [];
   for (let i = 0; i < (p.bioCount || 0); i++) {
-    const bx = 40 + Math.random() * (surfaceWidth - 80);
     surfaceBio.push({
-      x: bx, y: surfaceHeight - surfaceTerrain[Math.floor(bx)] - 4,
+      x: 40 + Math.random() * (surfaceWidth - 80),
+      y: 40 + Math.random() * (surfaceHeight - 80),
       type: Math.floor(Math.random() * 4), alive: true,
-      vx: (Math.random() - 0.5) * 1.5, vy: 0,
+      vx: (Math.random() - 0.5) * 1.5, vy: (Math.random() - 0.5) * 1.5,
+      moveTimer: 0,
     });
   }
-  // Precursor artifacts (rare finds on planet surfaces — SC2 had various artifacts)
+  // Precursor artifacts
   surfaceArtifacts = [];
-  if (Math.random() < 0.08) { // ~8% chance per planet
+  if (Math.random() < 0.08) {
     const artifactTypes = [
       { name: 'Precursor Data Core', bonus: 'minerals', value: 50, color: '#ffcc44' },
       { name: 'Ancient Power Cell', bonus: 'fuel', value: 30, color: '#44ffaa' },
@@ -5496,20 +5504,19 @@ function initLander(planetIdx) {
       { name: 'Warp Field Amplifier', bonus: 'minerals', value: 100, color: '#cc88ff' },
     ];
     const art = artifactTypes[Math.floor(Math.random() * artifactTypes.length)];
-    const ax = 50 + Math.random() * (surfaceWidth - 100);
     surfaceArtifacts.push({
-      ...art, x: ax,
-      y: surfaceHeight - surfaceTerrain[Math.floor(ax)] - 4,
+      ...art,
+      x: 50 + Math.random() * (surfaceWidth - 100),
+      y: 50 + Math.random() * (surfaceHeight - 100),
       collected: false,
     });
   }
-  // Hazard timers
   surfaceHazards = [];
-  // Lander state
+  // SC2 lander: top-down, starts at center
   landerX = surfaceWidth / 2;
-  landerY = 20; // starts high (descending)
+  landerY = surfaceHeight / 2;
   landerVX = 0; landerVY = 0;
-  landerAngle = 0;
+  landerAngle = -Math.PI / 2; // facing up
   landerFuel = 50;
   landerCargo = [];
   landerMaxCargo = 10;
@@ -5520,50 +5527,42 @@ function initLander(planetIdx) {
 function updateLander() {
   const s = starMap[currentStarIdx];
   const p = s.planets[currentPlanetIdx];
-  const gravity = 0.08;
-  const thrustPow = 0.2;
 
-  // Controls — SC2 lander: left/right move, up thrusts against gravity
-  if (keys['ArrowLeft'] || keys['KeyA']) landerVX -= 0.15;
-  if (keys['ArrowRight'] || keys['KeyD']) landerVX += 0.15;
+  // SC2 lander controls: turn left/right, thrust forward in facing direction
+  if (keys['ArrowLeft'] || keys['KeyA']) landerAngle -= 0.06;
+  if (keys['ArrowRight'] || keys['KeyD']) landerAngle += 0.06;
   if (keys['ArrowUp'] || keys['KeyW']) {
-    landerVY -= thrustPow;
-    if (landerFuel > 0) landerFuel -= 0.05;
+    landerVX += Math.cos(landerAngle) * 0.12;
+    landerVY += Math.sin(landerAngle) * 0.12;
+    if (landerFuel > 0) landerFuel -= 0.03;
   }
 
-  // Gravity
-  landerVY += gravity;
-  // Drag
-  landerVX *= 0.97; landerVY *= 0.99;
+  // Friction (SC2 lander slides on surface)
+  landerVX *= 0.96; landerVY *= 0.96;
   // Speed limit
-  landerVX = clamp(landerVX, -4, 4);
-  landerVY = clamp(landerVY, -4, 4);
+  const spd = Math.sqrt(landerVX * landerVX + landerVY * landerVY);
+  if (spd > 3.5) { landerVX *= 3.5 / spd; landerVY *= 3.5 / spd; }
   // Move
-  landerX += landerVX;
-  landerY += landerVY;
-  // Wrap horizontally (planet surface wraps)
-  if (landerX < 0) landerX += surfaceWidth;
-  if (landerX >= surfaceWidth) landerX -= surfaceWidth;
-  // Terrain collision
-  const terrH = surfaceTerrain[clamp(Math.floor(landerX), 0, surfaceWidth)];
-  const groundY = surfaceHeight - terrH;
-  if (landerY >= groundY - 4) {
-    landerY = groundY - 4;
-    landerVY = Math.min(0, landerVY);
-    // Hard landing damage
-    if (landerVY > 2) { landerHP--; sfx.hit(); }
-    landerVX *= 0.9; // ground friction
+  landerX += landerVX; landerY += landerVY;
+  // Clamp to planet surface bounds
+  landerX = clamp(landerX, 5, surfaceWidth - 5);
+  landerY = clamp(landerY, 5, surfaceHeight - 5);
+
+  // Mountain collision (terrain type 2 = impassable mountains)
+  const tx = clamp(Math.floor(landerX), 0, surfaceWidth - 1);
+  const ty = clamp(Math.floor(landerY), 0, surfaceHeight - 1);
+  if (surfaceTerrain[ty] && surfaceTerrain[ty][tx] === 2) {
+    landerX -= landerVX * 1.5; landerY -= landerVY * 1.5;
+    landerVX *= -0.3; landerVY *= -0.3;
+    if (spd > 2) { landerHP--; sfx.hit(); screenShake = 2; }
   }
-  // Ceiling
-  if (landerY < 2) landerY = 2;
 
   // Collect mineral deposits
   for (const dep of surfaceDeposits) {
-    if (!dep.collected && Math.abs(landerX - dep.x) < 8 && Math.abs(landerY - dep.y) < 8) {
+    if (!dep.collected && Math.abs(landerX - dep.x) < 10 && Math.abs(landerY - dep.y) < 10) {
       if (landerCargo.length < landerMaxCargo) {
         dep.collected = true;
         landerCargo.push(dep.type);
-        // Mark original deposit as collected
         p.deposits[dep.origIdx].collected = true;
         sfx.pickup();
       }
@@ -5572,10 +5571,10 @@ function updateLander() {
 
   // Collect bio
   for (const bio of surfaceBio) {
-    if (bio.alive && Math.abs(landerX - bio.x) < 8 && Math.abs(landerY - bio.y) < 8) {
+    if (bio.alive && Math.abs(landerX - bio.x) < 10 && Math.abs(landerY - bio.y) < 10) {
       if (landerCargo.length < landerMaxCargo) {
         bio.alive = false;
-        landerCargo.push(-1); // -1 = bio data
+        landerCargo.push(-1);
         sfx.pickup();
       }
     }
@@ -5584,7 +5583,7 @@ function updateLander() {
   // Collect Precursor artifacts
   if (surfaceArtifacts) {
     for (const art of surfaceArtifacts) {
-      if (!art.collected && Math.abs(landerX - art.x) < 10 && Math.abs(landerY - art.y) < 10) {
+      if (!art.collected && Math.abs(landerX - art.x) < 12 && Math.abs(landerY - art.y) < 12) {
         art.collected = true;
         if (art.bonus === 'minerals') minerals += art.value;
         else if (art.bonus === 'fuel') fuel = Math.min(200, fuel + art.value);
@@ -5596,18 +5595,35 @@ function updateLander() {
     }
   }
 
-  // Update bio creatures
+  // Update bio creatures — SC2 had them wander and chase
   for (const bio of surfaceBio) {
     if (!bio.alive) continue;
-    bio.x += bio.vx;
-    if (bio.x < 10 || bio.x > surfaceWidth - 10) bio.vx *= -1;
-    const bTerrH = surfaceTerrain[clamp(Math.floor(bio.x), 0, surfaceWidth)];
-    bio.y = surfaceHeight - bTerrH - 4;
+    bio.moveTimer--;
+    if (bio.moveTimer <= 0) {
+      bio.moveTimer = 30 + Math.random() * 60;
+      bio.vx = (Math.random() - 0.5) * 2;
+      bio.vy = (Math.random() - 0.5) * 2;
+    }
+    // Chase lander if close
+    const dx = landerX - bio.x, dy = landerY - bio.y;
+    const bd = Math.sqrt(dx * dx + dy * dy);
+    if (bd < 80) {
+      bio.vx = (dx / bd) * 1.2;
+      bio.vy = (dy / bd) * 1.2;
+      if (bd < 10 && frame % 20 === 0) {
+        landerHP--; sfx.hit(); screenShake = 2;
+        gameMessage = 'Bio-hazard attack!'; messageTimer = 30;
+      }
+    }
+    bio.x += bio.vx * 0.5; bio.y += bio.vy * 0.5;
+    bio.x = clamp(bio.x, 10, surfaceWidth - 10);
+    bio.y = clamp(bio.y, 10, surfaceHeight - 10);
   }
 
-  // SC2-style hazards based on planet type
-  if (p.hazard > 0 && frame % 40 === 0 && Math.random() < p.hazard * 0.2) {
-    const hx = landerX + (Math.random() - 0.5) * 250;
+  // SC2-style hazards
+  if (p.hazard > 0 && frame % 50 === 0 && Math.random() < p.hazard * 0.15) {
+    const hx = landerX + (Math.random() - 0.5) * 200;
+    const hy = landerY + (Math.random() - 0.5) * 200;
     let hType;
     if (p.type === 'Volcanic') hType = Math.random() < 0.7 ? 'lava' : 'quake';
     else if (p.type === 'Toxic') hType = Math.random() < 0.6 ? 'acid' : 'lightning';
@@ -5616,34 +5632,18 @@ function updateLander() {
     else if (p.type === 'Desert') hType = 'meteorite';
     else if (p.type === 'Jungle') hType = Math.random() < 0.5 ? 'lightning' : 'bioattack';
     else hType = ['quake', 'lightning', 'meteorite'][Math.floor(Math.random() * 3)];
-    surfaceHazards.push({ x: hx, y: hType === 'lightning' ? 0 : hType === 'meteorite' ? 0 : surfaceHeight - 10, type: hType, timer: hType === 'lightning' ? 15 : hType === 'meteorite' ? 60 : 40 + Math.random() * 30, vy: hType === 'meteorite' ? 3 : 0 });
-  }
-  // Hostile bio creatures attack lander (SC2 had aggressive life forms)
-  for (const bio of surfaceBio) {
-    if (!bio.alive) continue;
-    const dx = landerX - bio.x;
-    if (Math.abs(dx) < 60 && Math.abs(landerY - bio.y) < 30) {
-      bio.vx = Math.sign(dx) * 1.5; // chase lander
-      if (Math.abs(dx) < 10 && Math.abs(landerY - bio.y) < 12 && frame % 20 === 0) {
-        landerHP--; sfx.hit(); screenShake = 2;
-        gameMessage = 'Bio-hazard attack!'; messageTimer = 30;
-      }
-    }
+    surfaceHazards.push({ x: hx, y: hy, type: hType, timer: 40 + Math.random() * 30 });
   }
   // Update hazards
   for (let i = surfaceHazards.length - 1; i >= 0; i--) {
     const h = surfaceHazards[i];
     h.timer--;
-    if (h.type === 'meteorite') {
-      h.y += h.vy; h.x += (Math.random() - 0.5) * 0.5;
-      if (h.y > surfaceHeight - 10) { h.timer = 0; screenShake = 4; sfx.hit(); }
-    }
-    // Damage lander if close
-    if (h.type === 'lightning' && h.timer < 5 && h.timer > 0) {
-      if (Math.abs(landerX - h.x) < 15) { landerHP -= 2; sfx.explode(); screenShake = 5; }
-    } else if (h.type === 'meteorite' && Math.abs(landerX - h.x) < 12 && Math.abs(landerY - h.y) < 12) {
+    const hd = Math.sqrt((landerX - h.x) ** 2 + (landerY - h.y) ** 2);
+    if (h.type === 'lightning' && h.timer < 5 && h.timer > 0 && hd < 20) {
+      landerHP -= 2; sfx.explode(); screenShake = 5;
+    } else if (h.type === 'meteorite' && h.timer < 10 && hd < 15) {
       landerHP -= 2; sfx.hit(); screenShake = 4; h.timer = 0;
-    } else if (h.timer > 10 && h.timer < 30 && Math.abs(landerX - h.x) < 20 && landerY > surfaceHeight - 40) {
+    } else if ((h.type === 'lava' || h.type === 'quake') && h.timer > 10 && h.timer < 30 && hd < 25) {
       if (frame % 15 === 0) { landerHP--; sfx.hit(); screenShake = 3; }
     }
     if (h.timer <= 0) surfaceHazards.splice(i, 1);
@@ -5651,9 +5651,7 @@ function updateLander() {
 
   // Launch back to orbit (Escape or Q)
   if (justPressed['Escape'] || justPressed['KeyQ'] || landerHP <= 0) {
-    // Return cargo to ship
-    let totalMinerals = 0;
-    let bioData = 0;
+    let totalMinerals = 0, bioData = 0;
     for (const c of landerCargo) {
       if (c === -1) { bioData++; minerals += 3; totalMinerals += 3; if (!window._bioData) window._bioData = 0; window._bioData++; }
       else { const val = MINERAL_TYPES[c].value; minerals += val; totalMinerals += val; }
@@ -5674,277 +5672,187 @@ function updateLander() {
 function drawLander() {
   const s = starMap[currentStarIdx];
   const p = s.planets[currentPlanetIdx];
+  // SC2 top-down view: camera follows lander
+  const viewH = H - 40; // HUD at bottom
   const camX = clamp(landerX - W / 2, 0, Math.max(0, surfaceWidth - W));
+  const camY = clamp(landerY - viewH / 2, 0, Math.max(0, surfaceHeight - viewH));
 
-  // === SC2 Planet Surface Background ===
-  // Sky color based on planet type
-  const skyColors = {
-    Rocky: '#1a0800', Volcanic: '#2a0800', Desert: '#1a1400',
-    Water: '#001122', Jungle: '#001808', Ice: '#0a1020',
-    Toxic: '#0a1400', 'Gas Giant': '#0a0000', Rainbow: '#0a0014',
-  };
-  if (p.type === 'Rainbow') {
-    const hue = (frame * 0.5) % 360;
-    ctx.fillStyle = `hsl(${hue}, 30%, 5%)`;
-  } else {
-    ctx.fillStyle = skyColors[p.type] || '#0a0a0a';
-  }
-  ctx.fillRect(0, 0, W, H);
+  // === SC2 Top-Down Planet Surface ===
+  // Ground colors by planet type
+  const gc = {
+    Rocky: ['#664422','#553311','#775533'], Volcanic: ['#442211','#331100','#661100'],
+    Desert: ['#886633','#775522','#aa8844'], Water: ['#224466','#113355','#335577'],
+    Jungle: ['#225522','#114411','#337733'], Ice: ['#556688','#445577','#667799'],
+    Toxic: ['#445522','#334411','#556633'], 'Gas Giant': ['#443322','#332211','#554433'],
+    Rainbow: ['#444','#333','#555'],
+  }[p.type] || ['#444','#333','#555'];
 
-  // Stars in sky (top portion)
-  for (let i = 0; i < 30; i++) {
-    ctx.fillStyle = '#888';
-    ctx.fillRect((i * 47 + 3) % W, (i * 29 + 5) % (surfaceHeight - 30), 1, 1);
-  }
-
-  // Terrain
-  const terrColor1 = {
-    Rocky: '#664422', Volcanic: '#442211', Desert: '#886633',
-    Water: '#224466', Jungle: '#225522', Ice: '#556688',
-    Toxic: '#445522', 'Gas Giant': '#443322', Rainbow: '#444444',
-  };
-  const terrColor2 = {
-    Rocky: '#553311', Volcanic: '#331100', Desert: '#775522',
-    Water: '#113355', Jungle: '#114411', Ice: '#445577',
-    Toxic: '#334411', 'Gas Giant': '#332211', Rainbow: '#333333',
-  };
-
-  // Draw terrain fill
-  for (let sx = 0; sx < W; sx++) {
-    const wx = Math.floor(sx + camX);
-    if (wx < 0 || wx >= surfaceWidth) continue;
-    const th = surfaceTerrain[wx];
-    if (p.type === 'Rainbow') {
-      const hue = (wx * 2 + frame * 0.3) % 360;
-      ctx.fillStyle = `hsl(${hue}, 60%, 30%)`;
-    } else {
-      ctx.fillStyle = terrColor1[p.type] || '#444';
+  // Draw top-down terrain tiles
+  const tileSize = 4;
+  for (let sy = 0; sy < viewH; sy += tileSize) {
+    for (let sx = 0; sx < W; sx += tileSize) {
+      const wx = Math.floor(sx + camX), wy = Math.floor(sy + camY);
+      if (wy < 0 || wy >= surfaceHeight || wx < 0 || wx >= surfaceWidth) {
+        ctx.fillStyle = '#000'; ctx.fillRect(sx, sy, tileSize, tileSize); continue;
+      }
+      const t = surfaceTerrain[wy][wx];
+      if (p.type === 'Rainbow') {
+        const hue = (wx * 2 + wy * 2 + frame * 0.2) % 360;
+        ctx.fillStyle = t === 2 ? `hsl(${hue},40%,20%)` : t === 3 ? `hsl(${hue},60%,15%)` : `hsl(${hue},50%,30%)`;
+      } else {
+        ctx.fillStyle = t === 2 ? gc[1] : t === 3 ? '#112244' : gc[0];
+      }
+      ctx.fillRect(sx, sy, tileSize, tileSize);
+      if (t === 2) {
+        ctx.fillStyle = gc[2]; ctx.globalAlpha = 0.3;
+        ctx.fillRect(sx, sy, tileSize / 2, tileSize / 2);
+        ctx.globalAlpha = 1;
+      }
     }
-    ctx.fillRect(sx, surfaceHeight - th, 1, th);
-  }
-  // Terrain surface line
-  for (let sx = 0; sx < W; sx++) {
-    const wx = Math.floor(sx + camX);
-    if (wx < 0 || wx >= surfaceWidth) continue;
-    const th = surfaceTerrain[wx];
-    if (p.type === 'Rainbow') {
-      const hue = (wx * 2 + frame * 0.3 + 30) % 360;
-      ctx.fillStyle = `hsl(${hue}, 70%, 45%)`;
-    } else {
-      ctx.fillStyle = terrColor2[p.type] || '#333';
-    }
-    ctx.fillRect(sx, surfaceHeight - th, 1, 2);
   }
 
-  // Mineral deposits
+  // Mineral deposits (top-down)
   for (const dep of surfaceDeposits) {
     if (dep.collected) continue;
-    const dx = dep.x - camX;
-    if (dx < -10 || dx > W + 10) continue;
+    const dx = dep.x - camX, dy = dep.y - camY;
+    if (dx < -10 || dx > W + 10 || dy < -10 || dy > viewH + 10) continue;
     const mt = MINERAL_TYPES[dep.type];
     ctx.fillStyle = mt.color;
-    // SC2 mineral deposits: small colored squares with sparkle
-    ctx.fillRect(dx - 2, dep.y - 2, 4, 4);
+    ctx.fillRect(dx - 3, dy - 3, 6, 6);
     ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.4;
-    ctx.fillRect(dx - 1, dep.y - 1, 1, 1);
+    ctx.fillRect(dx - 1, dy - 1, 2, 2);
     ctx.globalAlpha = 1;
-    // SC2-style sparkle — periodic glint
     if ((frame + dep.x * 7) % 40 < 4) {
       ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.7;
-      ctx.fillRect(dx - 4, dep.y, 8, 1);
-      ctx.fillRect(dx, dep.y - 4, 1, 8);
+      ctx.fillRect(dx - 5, dy, 10, 1);
+      ctx.fillRect(dx, dy - 5, 1, 10);
       ctx.globalAlpha = 1;
     }
   }
 
-  // Bio creatures
+  // Bio creatures (top-down circles)
   for (const bio of surfaceBio) {
     if (!bio.alive) continue;
-    const bx = bio.x - camX;
-    if (bx < -10 || bx > W + 10) continue;
+    const bx = bio.x - camX, by = bio.y - camY;
+    if (bx < -10 || bx > W + 10 || by < -10 || by > viewH + 10) continue;
     const bioColors = ['#44ff44', '#44ffaa', '#aaff44', '#ffaa44'];
     ctx.fillStyle = bioColors[bio.type % bioColors.length];
-    // Simple creature shapes
-    ctx.fillRect(bx - 3, bio.y - 3, 6, 4);
-    ctx.fillRect(bx - 1, bio.y - 5, 2, 2); // head
-    // Legs
-    ctx.fillRect(bx - 3, bio.y + 1, 1, 2);
-    ctx.fillRect(bx + 2, bio.y + 1, 1, 2);
+    ctx.beginPath(); ctx.arc(bx, by, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.arc(bx - 1, by - 1, 1, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
-  // Precursor artifacts (glowing, pulsing items)
+  // Precursor artifacts (top-down)
   if (surfaceArtifacts) {
     for (const art of surfaceArtifacts) {
       if (art.collected) continue;
-      const ax = art.x - camX;
-      if (ax < -10 || ax > W + 10) continue;
-      // Pulsing glow
+      const ax = art.x - camX, ay = art.y - camY;
+      if (ax < -10 || ax > W + 10 || ay < -10 || ay > viewH + 10) continue;
       ctx.globalAlpha = 0.3 + Math.sin(frame * 0.1) * 0.15;
       ctx.fillStyle = art.color;
-      ctx.beginPath(); ctx.arc(ax, art.y, 8, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(ax, ay, 10, 0, TAU); ctx.fill();
       ctx.globalAlpha = 0.8;
-      ctx.fillStyle = art.color;
-      ctx.fillRect(ax - 3, art.y - 3, 6, 6);
-      // Star sparkle
+      ctx.fillRect(ax - 4, ay - 4, 8, 8);
       ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.6 + Math.sin(frame * 0.15) * 0.3;
-      ctx.fillRect(ax - 1, art.y - 5, 2, 10);
-      ctx.fillRect(ax - 5, art.y - 1, 10, 2);
+      ctx.fillRect(ax - 1, ay - 6, 2, 12);
+      ctx.fillRect(ax - 6, ay - 1, 12, 2);
       ctx.globalAlpha = 1;
     }
   }
 
-  // Hazards
+  // Hazards (top-down)
   for (const h of surfaceHazards) {
-    const hx = h.x - camX;
-    if (hx < -30 || hx > W + 30) continue;
-    if (h.type === 'lava') {
-      ctx.fillStyle = '#ff4400'; ctx.globalAlpha = 0.5 + Math.sin(frame * 0.2) * 0.3;
-      ctx.fillRect(hx - 10, surfaceHeight - 15, 20, 15);
-      ctx.fillStyle = '#ffcc00'; ctx.globalAlpha = 0.6;
-      ctx.fillRect(hx - 6, surfaceHeight - 10, 12, 8);
+    const hx = h.x - camX, hy = h.y - camY;
+    if (hx < -30 || hx > W + 30 || hy < -30 || hy > viewH + 30) continue;
+    if (h.type === 'lightning' && h.timer < 10) {
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.globalAlpha = h.timer / 10;
+      ctx.beginPath(); ctx.arc(hx, hy, 15 - h.timer, 0, TAU); ctx.stroke();
       ctx.globalAlpha = 1;
-    } else if (h.type === 'acid') {
-      ctx.fillStyle = '#88ff00'; ctx.globalAlpha = 0.4;
-      for (let i = 0; i < 3; i++) {
-        const ax = hx + Math.sin(frame * 0.1 + i * 2) * 8;
-        ctx.fillRect(ax - 2, surfaceHeight - 20 - i * 6, 4, 4);
-      }
+    } else if (h.type === 'lava' || h.type === 'acid') {
+      ctx.fillStyle = h.type === 'lava' ? '#ff4400' : '#88ff00';
+      ctx.globalAlpha = 0.4 + Math.sin(frame * 0.2) * 0.2;
+      ctx.beginPath(); ctx.arc(hx, hy, 12, 0, TAU); ctx.fill();
       ctx.globalAlpha = 1;
-    } else if (h.type === 'lightning') {
-      // SC2 lightning bolt — jagged line from sky to ground
-      if (h.timer < 10) {
-        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
-        ctx.globalAlpha = h.timer / 10;
-        ctx.beginPath(); ctx.moveTo(hx, 20);
-        let lx2 = hx, ly2 = 20;
-        for (let seg = 0; seg < 8; seg++) {
-          lx2 += (Math.random() - 0.5) * 20;
-          ly2 += (surfaceHeight - 20) / 8;
-          ctx.lineTo(lx2, ly2);
-        }
-        ctx.stroke();
-        // Flash glow
-        ctx.strokeStyle = '#88ccff'; ctx.lineWidth = 4; ctx.globalAlpha *= 0.3;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-    } else if (h.type === 'meteorite') {
-      // Falling meteorite
+    } else if (h.type === 'meteorite' && h.timer < 15) {
       ctx.fillStyle = '#ff8844';
-      ctx.beginPath(); ctx.arc(hx, h.y, 3, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#ffcc66';
-      ctx.beginPath(); ctx.arc(hx, h.y, 1.5, 0, TAU); ctx.fill();
-      // Trail
-      ctx.globalAlpha = 0.4; ctx.strokeStyle = '#ff4400'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(hx, h.y); ctx.lineTo(hx - 1, h.y - 15); ctx.stroke();
+      ctx.beginPath(); ctx.arc(hx, hy, 4, 0, TAU); ctx.fill();
+    } else if (h.type === 'quake' && h.timer > 15 && h.timer < 35) {
+      screenShake = 2;
+      ctx.strokeStyle = '#664422'; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+      ctx.beginPath(); ctx.arc(hx, hy, 20, 0, TAU); ctx.stroke();
       ctx.globalAlpha = 1;
-    } else if (h.type === 'bioattack') {
-      // Bio creature attack — green danger circle
-      ctx.globalAlpha = 0.3 + Math.sin(frame * 0.3) * 0.2;
-      ctx.fillStyle = '#44ff00';
-      ctx.beginPath(); ctx.arc(hx, surfaceHeight - 10, 8, 0, TAU); ctx.fill();
-      ctx.globalAlpha = 1;
-    } else {
-      // Quake — screen shake + ground crack visual
-      if (h.timer > 15 && h.timer < 35) {
-        screenShake = 2;
-        ctx.strokeStyle = '#664422'; ctx.lineWidth = 2; ctx.globalAlpha = 0.6;
-        ctx.beginPath(); ctx.moveTo(hx - 15, surfaceHeight - 5);
-        ctx.lineTo(hx - 5, surfaceHeight - 12); ctx.lineTo(hx + 3, surfaceHeight - 6);
-        ctx.lineTo(hx + 15, surfaceHeight - 10); ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
     }
   }
 
-  // === Lander ===
-  const lx = landerX - camX;
-  const ly = landerY;
-  // Lander body (SC2 style — small boxy vehicle)
-  ctx.fillStyle = '#888899';
-  ctx.fillRect(lx - 4, ly - 4, 8, 6);
-  ctx.fillStyle = '#aaaabb';
-  ctx.fillRect(lx - 3, ly - 3, 6, 4);
-  // Cockpit
+  // === Lander (top-down, rotatable like SC2) ===
+  const lx = landerX - camX, ly = landerY - camY;
+  ctx.save();
+  ctx.translate(lx, ly);
+  ctx.rotate(landerAngle + Math.PI / 2);
+  ctx.fillStyle = '#aabbcc';
+  ctx.fillRect(-4, -5, 8, 10);
+  ctx.fillStyle = '#889aab';
+  ctx.fillRect(-3, -4, 6, 8);
+  ctx.fillStyle = '#ff4444';
+  ctx.fillRect(-2, -6, 4, 2);
   ctx.fillStyle = '#44aaff';
-  ctx.fillRect(lx - 1, ly - 3, 2, 2);
-  // Landing legs
-  ctx.fillStyle = '#666677';
-  ctx.fillRect(lx - 5, ly + 2, 2, 2);
-  ctx.fillRect(lx + 3, ly + 2, 2, 2);
-  // Thruster flame
+  ctx.fillRect(-1, -3, 2, 3);
+  ctx.fillStyle = '#666';
+  ctx.fillRect(-3, 4, 6, 2);
   if (keys['ArrowUp'] || keys['KeyW']) {
     ctx.fillStyle = '#ff8844'; ctx.globalAlpha = 0.7 + Math.random() * 0.3;
-    ctx.fillRect(lx - 2, ly + 4, 4, 3 + Math.random() * 3);
+    ctx.fillRect(-2, 6, 4, 4 + Math.random() * 4);
     ctx.fillStyle = '#ffcc44';
-    ctx.fillRect(lx - 1, ly + 4, 2, 2);
+    ctx.fillRect(-1, 6, 2, 3);
     ctx.globalAlpha = 1;
   }
+  ctx.restore();
 
-  // === HUD (SC2 lander HUD) ===
-  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, surfaceHeight, W, H - surfaceHeight);
-  ctx.fillStyle = '#2244aa'; ctx.fillRect(0, surfaceHeight, W, 2);
-
-  // HP bar
-  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace';
-  ctx.fillText('HULL', 4, surfaceHeight + 12);
+  // === HUD ===
+  const hudY = viewH;
+  ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, hudY, W, 40);
+  ctx.fillStyle = '#2244aa'; ctx.fillRect(0, hudY, W, 2);
+  ctx.fillStyle = '#6688aa'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('HULL', 4, hudY + 12);
   for (let i = 0; i < landerMaxHP; i++) {
     ctx.fillStyle = i < landerHP ? '#44ff44' : '#331111';
-    ctx.fillRect(30 + i * 10, surfaceHeight + 6, 8, 6);
+    ctx.fillRect(30 + i * 10, hudY + 6, 8, 6);
   }
-
-  // Cargo
   ctx.fillStyle = '#6688aa';
-  ctx.fillText('CARGO', 4, surfaceHeight + 24);
+  ctx.fillText('CARGO', 4, hudY + 24);
   for (let i = 0; i < landerMaxCargo; i++) {
     if (i < landerCargo.length) {
       const c = landerCargo[i];
       ctx.fillStyle = c === -1 ? '#44ff44' : MINERAL_TYPES[c].color;
-    } else {
-      ctx.fillStyle = '#222233';
-    }
-    ctx.fillRect(40 + i * 8, surfaceHeight + 18, 6, 6);
+    } else { ctx.fillStyle = '#222233'; }
+    ctx.fillRect(40 + i * 8, hudY + 18, 6, 6);
   }
-
-  // Fuel
   ctx.fillStyle = '#6688aa';
-  ctx.fillText('FUEL', 160, surfaceHeight + 12);
-  ctx.fillStyle = '#111'; ctx.fillRect(186, surfaceHeight + 6, 40, 6);
+  ctx.fillText('FUEL', 160, hudY + 12);
+  ctx.fillStyle = '#111'; ctx.fillRect(186, hudY + 6, 40, 6);
   ctx.fillStyle = landerFuel > 10 ? '#22cc44' : '#cc4400';
-  ctx.fillRect(186, surfaceHeight + 6, 40 * (landerFuel / 50), 6);
-
-  // Planet info
+  ctx.fillRect(186, hudY + 6, 40 * (landerFuel / 50), 6);
   ctx.fillStyle = '#aaccff'; ctx.font = '7px monospace';
-  ctx.fillText(p.name, 240, surfaceHeight + 12);
+  ctx.fillText(p.name, 240, hudY + 12);
   ctx.fillStyle = '#6688aa';
-  ctx.fillText(p.type, 240, surfaceHeight + 24);
-
-  // Controls
+  ctx.fillText(p.type, 240, hudY + 24);
   ctx.fillStyle = '#445566'; ctx.font = '6px monospace';
-  ctx.fillText('ARROWS move  Q launch', 4, H - 2);
-
-  // Remaining deposits count
+  ctx.fillText('ARROWS turn/thrust  Q launch', 4, H - 2);
   const remaining = surfaceDeposits.filter(d => !d.collected).length;
   const bioRemain = surfaceBio.filter(b => b.alive).length;
   ctx.fillStyle = '#ffcc44'; ctx.font = '7px monospace';
-  ctx.fillText(`${remaining} deposits`, 160, surfaceHeight + 24);
-  if (bioRemain > 0) {
-    ctx.fillStyle = '#44ff44';
-    ctx.fillText(`${bioRemain} life`, 230, surfaceHeight + 24);
-  }
-
-  // Warning for hazards
+  ctx.fillText(`${remaining} deposits`, 160, hudY + 24);
+  if (bioRemain > 0) { ctx.fillStyle = '#44ff44'; ctx.fillText(`${bioRemain} life`, 230, hudY + 24); }
   if (surfaceHazards.length > 0) {
     ctx.fillStyle = '#ff4444'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
     if (Math.floor(frame / 10) % 2) ctx.fillText('!! HAZARD !!', W/2, 12);
     ctx.textAlign = 'left';
   }
-
-  // Message
   if (messageTimer > 0) {
     messageTimer--;
     ctx.fillStyle = '#ffcc44'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(gameMessage, W/2, surfaceHeight - 10);
+    ctx.fillText(gameMessage, W/2, viewH - 10);
     ctx.textAlign = 'left';
   }
 }
