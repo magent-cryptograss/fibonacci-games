@@ -34,11 +34,6 @@ const sfx = (() => {
   }
   document.addEventListener('keydown', () => {
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-    // Also resume music context
-    if (music && music._getCtx) {
-      const mc = music._getCtx();
-      if (mc && mc.state === 'suspended') mc.resume();
-    }
   }, { once: false });
   function tone(freq, dur, type, vol, slide) {
     const c = getCtx(), t = c.currentTime;
@@ -121,311 +116,58 @@ const sfx = (() => {
 
 // ==================== MUSIC ====================
 const music = (() => {
-  let audioCtx = null, loopTimer = null, currentTrack = null, masterGain = null, oscs = [];
-  function getCtx() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (!masterGain) { masterGain = audioCtx.createGain(); masterGain.gain.value = 0.12; masterGain.connect(audioCtx.destination); }
-    return audioCtx;
-  }
-  function stop() {
-    if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
-    for (const o of oscs) try { o.stop(); } catch(e) {}
-    oscs = []; currentTrack = null;
-  }
-  // SC2-authentic drum kit via noise + pitched oscillators
-  function schedDrum(c, type, time) {
-    if (type === 'kick') {
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(150, time); o.frequency.exponentialRampToValueAtTime(30, time + 0.15);
-      g.gain.setValueAtTime(0.7, time); g.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
-      o.connect(g); g.connect(masterGain); o.start(time); o.stop(time + 0.2); oscs.push(o);
-    } else if (type === 'snare') {
-      // Noise burst + body tone
-      const buf = c.createBuffer(1, c.sampleRate * 0.1, c.sampleRate);
-      const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-      const n = c.createBufferSource(), gn = c.createGain();
-      n.buffer = buf; gn.gain.setValueAtTime(0.4, time); gn.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
-      n.connect(gn); gn.connect(masterGain); n.start(time); n.stop(time + 0.1); oscs.push(n);
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = 'triangle'; o.frequency.value = 200;
-      g.gain.setValueAtTime(0.3, time); g.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
-      o.connect(g); g.connect(masterGain); o.start(time); o.stop(time + 0.08); oscs.push(o);
-    } else if (type === 'hihat') {
-      const buf = c.createBuffer(1, c.sampleRate * 0.04, c.sampleRate);
-      const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-      const n = c.createBufferSource(), gn = c.createGain();
-      // High-pass filter for hihat
-      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
-      n.buffer = buf; gn.gain.setValueAtTime(0.15, time); gn.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
-      n.connect(hp); hp.connect(gn); gn.connect(masterGain); n.start(time); n.stop(time + 0.04); oscs.push(n);
-    } else if (type === 'openhat') {
-      const buf = c.createBuffer(1, c.sampleRate * 0.15, c.sampleRate);
-      const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-      const n = c.createBufferSource(), gn = c.createGain();
-      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 6000;
-      n.buffer = buf; gn.gain.setValueAtTime(0.2, time); gn.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
-      n.connect(hp); hp.connect(gn); gn.connect(masterGain); n.start(time); n.stop(time + 0.15); oscs.push(n);
-    } else if (type === 'tom') {
-      const o = c.createOscillator(), g = c.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(100, time); o.frequency.exponentialRampToValueAtTime(50, time + 0.12);
-      g.gain.setValueAtTime(0.5, time); g.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
-      o.connect(g); g.connect(masterGain); o.start(time); o.stop(time + 0.15); oscs.push(o);
-    }
-  }
-  const N = { C2:65,Cs2:69,D2:73,Ds2:78,E2:82,F2:87,Fs2:92,G2:98,Gs2:104,A2:110,Bb2:117,B2:123,
-    C3:131,Cs3:139,D3:147,Ds3:156,E3:165,F3:175,Fs3:185,G3:196,Gs3:208,A3:220,Bb3:233,B3:247,
-    C4:262,Cs4:277,D4:294,Ds4:311,Eb4:311,E4:330,F4:349,Fs4:370,Gb4:370,G4:392,Gs4:415,Ab4:415,A4:440,Bb4:466,B4:494,
-    C5:523,Cs5:554,D5:587,Ds5:622,Eb5:622,E5:659,F5:698,Fs5:740,G5:784,Gs5:831,A5:880,Bb5:932,B5:988,
-    C6:1047,D6:1175,E6:1319,F6:1397,G6:1568,A6:1760,R:0 };
-  const TRACKS = {
-    // SC2 Title - the iconic Ur-Quan Masters intro: heroic brass-like fanfare in Bb major
-    // Modeled after the actual SC2 title screen music by Riku Nuottajärvi
-    title: { tempo: 132, type: 'sawtooth',
-      bass: [[N.Bb2,0.5],[N.Bb2,0.25],[N.R,0.25],[N.F3,0.5],[N.Bb2,0.5],
-             [N.Bb2,0.5],[N.Bb2,0.25],[N.R,0.25],[N.F3,0.5],[N.Bb2,0.5],
-             [N.Eb4,0.5],[N.Eb4,0.25],[N.R,0.25],[N.Bb3,0.5],[N.Eb4,0.5],
-             [N.F3,0.5],[N.F3,0.25],[N.R,0.25],[N.C3,0.5],[N.F3,0.5],
-             [N.Bb2,0.5],[N.Bb2,0.25],[N.R,0.25],[N.D3,0.5],[N.F3,0.5],
-             [N.G3,0.5],[N.G3,0.25],[N.R,0.25],[N.D3,0.5],[N.G3,0.5],
-             [N.Eb4,0.5],[N.Eb4,0.25],[N.R,0.25],[N.Bb3,0.5],[N.Eb4,0.5],
-             [N.F3,1],[N.F3,0.5],[N.R,0.5]],
-      lead: [[N.R,2],[N.Bb4,0.5],[N.D5,0.5],
-             [N.F5,1.5],[N.Eb5,0.5],[N.D5,0.5],[N.C5,0.5],
-             [N.Bb4,1],[N.R,0.5],[N.F4,0.5],
-             [N.Bb4,0.5],[N.C5,0.5],[N.D5,1],[N.C5,0.5],[N.Bb4,0.5],
-             [N.A4,1],[N.R,0.5],[N.F4,0.5],
-             [N.G4,0.5],[N.A4,0.5],[N.Bb4,1],[N.D5,0.5],[N.C5,0.5],
-             [N.Bb4,0.5],[N.A4,0.5],[N.G4,0.5],[N.F4,0.5],
-             [N.Bb4,1.5],[N.R,0.5],
-             [N.D5,0.5],[N.Eb5,0.5],[N.F5,1],[N.Eb5,0.5],[N.D5,0.5],
-             [N.C5,0.5],[N.D5,0.5],[N.Eb5,1],[N.D5,0.5],[N.C5,0.5],
-             [N.Bb4,0.5],[N.C5,0.5],[N.D5,0.5],[N.F5,0.5],
-             [N.Eb5,1],[N.D5,0.5],[N.C5,0.5],
-             [N.Bb4,2],[N.R,1]],
-      drums: [[0.5,'kick'],[0.25,'hihat'],[0.25,'hihat'],[0.5,'snare'],[0.25,'hihat'],[0.25,'kick'],
-              [0.5,'kick'],[0.25,'hihat'],[0.25,'hihat'],[0.5,'snare'],[0.25,'hihat'],[0.25,'openhat']],
-      arp: [[N.Bb3,0.25],[N.D4,0.25],[N.F4,0.25],[N.D4,0.25],[N.Bb3,0.25],[N.D4,0.25],[N.F4,0.25],[N.Bb4,0.25],
-            [N.Eb4,0.25],[N.G4,0.25],[N.Bb4,0.25],[N.G4,0.25],[N.F4,0.25],[N.A4,0.25],[N.C5,0.25],[N.A4,0.25]]
-    },
-    // SC2 HyperSpace - the iconic pulsing, driving red-space theme
-    // Based on the actual SC2 hyperspace music: minor key, steady pulse, ominous
-    map: { tempo: 126, type: 'square',
-      bass: [[N.E2,0.25],[N.R,0.25],[N.E2,0.25],[N.R,0.25],[N.E3,0.25],[N.R,0.25],[N.E2,0.25],[N.R,0.25],
-             [N.E2,0.25],[N.R,0.25],[N.E2,0.25],[N.R,0.25],[N.B2,0.25],[N.R,0.25],[N.E2,0.25],[N.R,0.25],
-             [N.A2,0.25],[N.R,0.25],[N.A2,0.25],[N.R,0.25],[N.E3,0.25],[N.R,0.25],[N.A2,0.25],[N.R,0.25],
-             [N.B2,0.25],[N.R,0.25],[N.B2,0.25],[N.R,0.25],[N.Fs2,0.25],[N.R,0.25],[N.B2,0.25],[N.R,0.25],
-             [N.C3,0.25],[N.R,0.25],[N.C3,0.25],[N.R,0.25],[N.G3,0.25],[N.R,0.25],[N.C3,0.25],[N.R,0.25],
-             [N.D3,0.25],[N.R,0.25],[N.D3,0.25],[N.R,0.25],[N.A3,0.25],[N.R,0.25],[N.D3,0.25],[N.R,0.25],
-             [N.B2,0.25],[N.R,0.25],[N.B2,0.25],[N.R,0.25],[N.B2,0.5],[N.R,0.5]],
-      lead: [[N.B4,1],[N.R,0.5],[N.E4,0.5],
-             [N.Fs4,0.5],[N.G4,0.5],[N.A4,0.5],[N.B4,0.5],
-             [N.E5,1],[N.D5,0.5],[N.B4,0.5],
-             [N.A4,1],[N.R,0.5],[N.G4,0.5],
-             [N.Fs4,0.5],[N.E4,0.5],[N.Fs4,0.5],[N.G4,0.5],
-             [N.A4,1],[N.B4,0.5],[N.A4,0.5],
-             [N.G4,0.5],[N.Fs4,0.5],[N.E4,0.5],[N.Fs4,0.5],
-             [N.B4,1.5],[N.R,0.5],
-             [N.B4,0.5],[N.D5,0.5],[N.E5,1],
-             [N.D5,0.5],[N.B4,0.5],[N.A4,0.5],[N.G4,0.5],
-             [N.Fs4,0.5],[N.G4,0.5],[N.A4,1],
-             [N.B4,1.5],[N.R,0.5]],
-      drums: [[0.5,'kick'],[0.5,'hihat'],[0.5,'kick'],[0.5,'hihat'],
-              [0.5,'kick'],[0.5,'snare'],[0.5,'kick'],[0.5,'hihat']],
-      arp: [[N.E3,0.25],[N.G3,0.25],[N.B3,0.25],[N.E3,0.25],[N.G3,0.25],[N.B3,0.25],[N.E3,0.25],[N.G3,0.25],
-            [N.A3,0.25],[N.C4,0.25],[N.E4,0.25],[N.A3,0.25],[N.B3,0.25],[N.D4,0.25],[N.Fs4,0.25],[N.B3,0.25]]
-    },
-    // SC2 Combat / Super Melee - fast, aggressive, driving E minor
-    // Based on the actual SC2 melee combat music feel
-    combat: { tempo: 180, type: 'sawtooth',
-      bass: [[N.E2,0.25],[N.E2,0.25],[N.E3,0.25],[N.E2,0.25],[N.E2,0.25],[N.E2,0.25],[N.G2,0.25],[N.A2,0.25],
-             [N.B2,0.25],[N.B2,0.25],[N.B2,0.25],[N.E2,0.25],[N.A2,0.25],[N.A2,0.25],[N.B2,0.25],[N.A2,0.25],
-             [N.G2,0.25],[N.G2,0.25],[N.G3,0.25],[N.G2,0.25],[N.G2,0.25],[N.G2,0.25],[N.A2,0.25],[N.B2,0.25],
-             [N.C3,0.25],[N.C3,0.25],[N.C3,0.25],[N.D3,0.25],[N.B2,0.5],[N.B2,0.25],[N.R,0.25],
-             [N.E2,0.25],[N.E2,0.25],[N.E3,0.25],[N.E2,0.25],[N.E2,0.25],[N.G2,0.25],[N.A2,0.25],[N.B2,0.25],
-             [N.C3,0.25],[N.C3,0.25],[N.D3,0.25],[N.C3,0.25],[N.B2,0.25],[N.B2,0.25],[N.A2,0.25],[N.B2,0.25]],
-      lead: [[N.E5,0.25],[N.R,0.25],[N.E5,0.25],[N.R,0.25],[N.G5,0.5],[N.Fs5,0.25],[N.E5,0.25],
-             [N.D5,0.5],[N.E5,0.5],[N.B4,0.5],[N.R,0.5],
-             [N.E5,0.25],[N.R,0.25],[N.E5,0.25],[N.Fs5,0.25],[N.G5,0.5],[N.A5,0.25],[N.G5,0.25],
-             [N.Fs5,0.5],[N.E5,0.5],[N.D5,0.5],[N.R,0.5],
-             [N.B4,0.25],[N.D5,0.25],[N.E5,0.5],[N.G5,0.5],[N.Fs5,0.25],[N.E5,0.25],
-             [N.D5,0.5],[N.B4,0.5],[N.A4,0.25],[N.B4,0.25],[N.R,0.5],
-             [N.E5,0.5],[N.G5,0.5],[N.A5,0.5],[N.G5,0.25],[N.Fs5,0.25],
-             [N.E5,1],[N.D5,0.5],[N.R,0.5],
-             [N.B5,0.25],[N.R,0.25],[N.A5,0.25],[N.G5,0.25],[N.Fs5,0.5],[N.E5,0.5],
-             [N.D5,0.5],[N.E5,0.5],[N.B4,0.5],[N.R,0.5]],
-      drums: [[0.25,'kick'],[0.25,'hihat'],[0.25,'hihat'],[0.25,'kick'],[0.25,'snare'],[0.25,'hihat'],[0.25,'kick'],[0.25,'hihat'],
-              [0.25,'kick'],[0.25,'hihat'],[0.25,'hihat'],[0.25,'kick'],[0.25,'snare'],[0.25,'hihat'],[0.25,'openhat'],[0.25,'hihat']],
-      arp: null
-    },
-    // SC2 Dialogue - mysterious, atmospheric, slow pulsing in D minor
-    dialogue: { tempo: 76, type: 'triangle',
-      bass: [[N.D3,2],[N.A2,1],[N.R,1],
-             [N.Bb2,2],[N.F3,1],[N.R,1],
-             [N.G2,2],[N.D3,1],[N.A2,1],
-             [N.D3,2],[N.R,2]],
-      lead: [[N.D5,1],[N.R,1],[N.F5,0.5],[N.E5,0.5],[N.D5,1],
-             [N.A4,1],[N.R,0.5],[N.Bb4,0.5],[N.A4,0.5],[N.G4,0.5],
-             [N.A4,2],[N.R,2],
-             [N.D5,0.5],[N.E5,0.5],[N.F5,1],[N.E5,1],[N.D5,0.5],[N.Cs5,0.5],
-             [N.D5,2],[N.R,2]],
-      drums: [[2,'kick'],[2,'R'],[2,'hihat'],[2,'R']],
-      arp: [[N.D4,0.5],[N.F4,0.5],[N.A4,0.5],[N.R,0.5],[N.D4,0.5],[N.F4,0.5],[N.A4,0.5],[N.R,0.5]]
-    },
-    // SC2 Starbase - warm, safe, the Commander Hayes theme, C major military march feel
-    starbase: { tempo: 95, type: 'triangle',
-      bass: [[N.C3,0.5],[N.R,0.25],[N.C3,0.25],[N.E3,0.5],[N.G2,0.5],
-             [N.C3,0.5],[N.R,0.25],[N.C3,0.25],[N.G3,0.5],[N.E3,0.5],
-             [N.F3,0.5],[N.R,0.25],[N.F3,0.25],[N.A3,0.5],[N.F3,0.5],
-             [N.G3,0.5],[N.R,0.25],[N.G3,0.25],[N.B3,0.5],[N.G3,0.5],
-             [N.A3,0.5],[N.R,0.25],[N.A3,0.25],[N.E3,0.5],[N.A2,0.5],
-             [N.F3,0.5],[N.E3,0.5],[N.D3,0.5],[N.G3,0.5],
-             [N.C3,1],[N.R,1]],
-      lead: [[N.E4,0.5],[N.G4,0.5],[N.C5,1.5],[N.B4,0.5],
-             [N.A4,0.5],[N.G4,0.5],[N.A4,1],[N.R,1],
-             [N.F4,0.5],[N.A4,0.5],[N.C5,1.5],[N.B4,0.5],
-             [N.G4,0.5],[N.A4,0.5],[N.B4,1],[N.R,1],
-             [N.C5,0.5],[N.D5,0.5],[N.E5,1],[N.D5,0.5],[N.C5,0.5],
-             [N.B4,0.5],[N.A4,0.5],[N.G4,0.5],[N.A4,0.5],
-             [N.G4,1.5],[N.R,0.5],
-             [N.E4,0.5],[N.F4,0.5],[N.G4,1],[N.A4,0.5],[N.G4,0.5],
-             [N.F4,0.5],[N.E4,0.5],[N.D4,0.5],[N.E4,0.5],
-             [N.C4,2],[N.R,1]],
-      drums: [[1,'kick'],[0.5,'hihat'],[0.5,'hihat'],[1,'snare'],[0.5,'hihat'],[0.5,'hihat']],
-      arp: [[N.C4,0.5],[N.E4,0.5],[N.G4,0.5],[N.E4,0.5],[N.F4,0.5],[N.A4,0.5],[N.C5,0.5],[N.A4,0.5]]
-    },
-    // SC2 Orbit/Planet scan - serene, spacey, ambient with sine waves
-    orbit: { tempo: 80, type: 'sine',
-      bass: [[N.A2,2],[N.E3,1],[N.R,1],
-             [N.F3,2],[N.C3,1],[N.R,1],
-             [N.D3,2],[N.A2,1],[N.R,1],
-             [N.E3,2],[N.B2,1],[N.R,1]],
-      lead: [[N.A4,1],[N.R,0.5],[N.C5,0.5],[N.E5,1.5],[N.D5,0.5],
-             [N.C5,1],[N.A4,0.5],[N.R,1.5],
-             [N.F4,0.5],[N.A4,0.5],[N.C5,1.5],[N.R,0.5],[N.B4,0.5],[N.A4,0.5],
-             [N.G4,1],[N.R,1],[N.A4,1],[N.R,1],
-             [N.D5,0.5],[N.C5,0.5],[N.A4,1],[N.R,0.5],[N.E4,0.5],
-             [N.A4,2],[N.R,2]],
-      drums: null,
-      arp: [[N.A3,0.5],[N.C4,0.5],[N.E4,0.5],[N.R,0.5],[N.F3,0.5],[N.A3,0.5],[N.C4,0.5],[N.R,0.5],
-            [N.D4,0.5],[N.F4,0.5],[N.A4,0.5],[N.R,0.5],[N.E3,0.5],[N.G3,0.5],[N.B3,0.5],[N.R,0.5]]
-    },
-    // SC2 Planet Lander - tense surface exploration, driving urgency
-    lander: { tempo: 115, type: 'square',
-      bass: [[N.A2,0.25],[N.R,0.25],[N.A2,0.25],[N.R,0.25],[N.E3,0.25],[N.R,0.25],[N.A2,0.25],[N.R,0.25],
-             [N.A2,0.25],[N.R,0.25],[N.A2,0.25],[N.R,0.25],[N.C3,0.25],[N.R,0.25],[N.E3,0.25],[N.R,0.25],
-             [N.D3,0.25],[N.R,0.25],[N.D3,0.25],[N.R,0.25],[N.F3,0.25],[N.R,0.25],[N.A3,0.25],[N.R,0.25],
-             [N.E3,0.25],[N.R,0.25],[N.E3,0.25],[N.R,0.25],[N.B2,0.5],[N.R,0.5]],
-      lead: [[N.A4,0.5],[N.R,0.25],[N.A4,0.25],[N.C5,0.5],[N.E5,0.5],
-             [N.D5,0.5],[N.R,0.25],[N.C5,0.25],[N.A4,0.5],[N.R,0.5],
-             [N.F5,0.5],[N.E5,0.25],[N.D5,0.25],[N.C5,0.5],[N.R,0.5],
-             [N.B4,0.25],[N.A4,0.25],[N.G4,0.25],[N.A4,0.25],[N.E4,0.5],[N.R,0.5],
-             [N.A4,0.5],[N.C5,0.5],[N.E5,0.5],[N.D5,0.25],[N.C5,0.25],
-             [N.A4,1],[N.R,0.5],[N.E4,0.5]],
-      drums: [[0.5,'hihat'],[0.5,'kick'],[0.5,'hihat'],[0.5,'snare'],
-              [0.5,'hihat'],[0.5,'kick'],[0.5,'hihat'],[0.5,'snare']],
-      arp: null
-    },
-    // SC2 Victory fanfare - triumphant, short celebration
-    victory: { tempo: 140, type: 'triangle',
-      bass: [[N.C3,0.5],[N.E3,0.5],[N.G3,0.5],[N.C4,0.5],
-             [N.F3,0.5],[N.A3,0.5],[N.C4,0.5],[N.F4,0.5],
-             [N.G3,0.5],[N.B3,0.5],[N.D4,0.5],[N.G4,0.5],
-             [N.C3,1],[N.C4,1],[N.R,2]],
-      lead: [[N.E5,0.5],[N.G5,0.5],[N.C6,1],
-             [N.B5,0.5],[N.A5,0.5],[N.G5,0.5],[N.A5,0.5],
-             [N.G5,0.5],[N.F5,0.5],[N.G5,1],
-             [N.E5,0.5],[N.G5,0.5],[N.C6,1.5],[N.R,0.5],
-             [N.R,2]],
-      drums: [[0.5,'kick'],[0.5,'snare'],[0.5,'kick'],[0.5,'snare'],
-              [0.5,'kick'],[0.5,'kick'],[0.5,'snare'],[0.5,'openhat'],
-              [1,'kick'],[1,'R']],
-      arp: null
-    },
+  let currentTrack = null, currentAudio = null;
+  // Actual SC2 3DO music files from The Ur-Quan Masters (open source)
+  const AUDIO_MAP = {
+    title: 'space.ogg',
+    map: 'hyper.ogg',
+    combat: 'battle.ogg',
+    starbase: 'starbase.ogg',
+    orbit: 'orbit1.ogg',
+    dialogue: 'starbase.ogg',
+    lander: 'shipyard.ogg',
+    victory: 'credits.ogg',
+    upgrade: 'outfit.ogg',
   };
-  // MOD tracker-style: detuned pair for chorus, proper envelopes, warm filters
-  // Kept lightweight to avoid freezing — max 2 oscs per note, no LFO per-note
-  function schedLead(c, freq, time, dur, waveType) {
-    if (freq <= 0) return;
-    const g = c.createGain();
-    // Detuned pair for chorus/thickness
-    const o1 = c.createOscillator(), o2 = c.createOscillator();
-    o1.type = waveType; o2.type = waveType;
-    o1.frequency.setValueAtTime(freq, time);
-    o2.frequency.setValueAtTime(freq * 1.005, time);
-    // Envelope: quick attack, sustain, smooth release
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(0.22, time + 0.015);
-    g.gain.setValueAtTime(0.2, time + dur * 0.6);
-    g.gain.linearRampToValueAtTime(0, time + dur * 0.95);
-    o1.connect(g); o2.connect(g); g.connect(masterGain);
-    o1.start(time); o1.stop(time + dur);
-    o2.start(time); o2.stop(time + dur);
-    oscs.push(o1, o2);
+  // Preload all tracks
+  const cache = {};
+  for (const [k, file] of Object.entries(AUDIO_MAP)) {
+    const a = new Audio(file);
+    a.loop = true;
+    a.volume = 0.5;
+    a.preload = 'auto';
+    cache[k] = a;
+    // Victory shouldn't loop
+    if (k === 'victory') a.loop = false;
   }
-  // Bass: sawtooth with punch
-  function schedBass(c, freq, time, dur) {
-    if (freq <= 0) return;
-    const o = c.createOscillator(), g = c.createGain();
-    o.type = 'sawtooth'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(0.35, time + 0.01);
-    g.gain.setValueAtTime(0.3, time + dur * 0.5);
-    g.gain.linearRampToValueAtTime(0, time + dur * 0.9);
-    o.connect(g); g.connect(masterGain);
-    o.start(time); o.stop(time + dur); oscs.push(o);
-  }
-  // Arp: single bright oscillator
-  function schedArp(c, freq, time, dur) {
-    if (freq <= 0) return;
-    const o = c.createOscillator(), g = c.createGain();
-    o.type = 'triangle'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(0.1, time + 0.01);
-    g.gain.linearRampToValueAtTime(0, time + dur * 0.7);
-    o.connect(g); g.connect(masterGain);
-    o.start(time); o.stop(time + dur); oscs.push(o);
+  // Orbit has 5 variants — pick random on play
+  const orbitFiles = ['orbit1.ogg','orbit2.ogg','orbit3.ogg','orbit4.ogg','orbit5.ogg'];
+  function stop() {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
+    currentTrack = null; currentAudio = null;
   }
   function play(name) {
     if (currentTrack === name) return;
-    stop(); currentTrack = name;
-    const tr = TRACKS[name]; if (!tr) return;
-    const c = getCtx(); if (c.state === 'suspended') return;
-    let bi = 0, li = 0, di = 0, ai = 0;
-    let bt = c.currentTime + 0.1, lt = c.currentTime + 0.1, dt = c.currentTime + 0.1, at = c.currentTime + 0.1;
-    const bl = 60 / tr.tempo;
-    function sched() {
-      const now = c.currentTime;
-      while (bt < now + 1.5) {
-        const [f,d] = tr.bass[bi % tr.bass.length];
-        schedBass(c, f, bt, d * bl);
-        bt += d * bl; bi++;
-      }
-      while (lt < now + 1.5) {
-        const [f,d] = tr.lead[li % tr.lead.length];
-        schedLead(c, f, lt, d * bl, tr.type || 'triangle');
-        lt += d * bl; li++;
-      }
-      if (tr.drums) {
-        while (dt < now + 1.5) {
-          const [d, type] = tr.drums[di % tr.drums.length];
-          if (type !== 'R') schedDrum(c, type, dt);
-          dt += d * bl; di++;
-        }
-      }
-      if (tr.arp) {
-        while (at < now + 1.5) {
-          const [f,d] = tr.arp[ai % tr.arp.length];
-          schedArp(c, f, at, d * bl);
-          at += d * bl; ai++;
-        }
-      }
-      // Clean up finished oscillators
-      const ct = c.currentTime;
-      oscs = oscs.filter(o => { try { return o.context.currentTime < ct + 2; } catch(e) { return false; } });
+    stop();
+    currentTrack = name;
+    // For orbit, pick a random variant
+    if (name === 'orbit') {
+      const file = orbitFiles[Math.floor(Math.random() * orbitFiles.length)];
+      const a = new Audio(file);
+      a.loop = true; a.volume = 0.5;
+      currentAudio = a;
+    } else {
+      currentAudio = cache[name];
     }
-    sched(); loopTimer = setInterval(sched, 400);
+    if (currentAudio) {
+      currentAudio.currentTime = 0;
+      currentAudio.play().catch(() => {});
+    }
   }
-  return { play, stop, _getCtx: getCtx };
+  return { play, stop };
 })();
 
 // ==================== INPUT ====================
