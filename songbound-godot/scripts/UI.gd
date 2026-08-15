@@ -104,6 +104,30 @@ static func shadow(ci: CanvasItem, cx: float, cy: float, rx: float, ry: float) -
 	pellipse(ci, cx, cy, rx, ry, Color(0, 0, 0, 0.3))
 
 
+## Draw a 16x24 palette-index sprite. frame animates the legs and adds a bob,
+## which is enough to read as walking without four hand-drawn sheets.
+static func sprite(ci: CanvasItem, g: PackedByteArray, x: float, y: float, sc: int = 1,
+		flip: bool = false, walking: bool = false, frame: int = 0, tint = null) -> void:
+	var bob := 1 if walking and (frame % 4 == 1 or frame % 4 == 3) else 0
+	var leg := 0
+	if walking:
+		leg = 1 if frame % 4 == 1 else (-1 if frame % 4 == 3 else 0)
+	for yy in Sprites.H:
+		for xx in Sprites.W:
+			var sx := (Sprites.W - 1 - xx) if flip else xx
+			var v := g[yy * Sprites.W + sx]
+			if v == 0:
+				continue
+			var c: Color = tint if tint != null else Sprites.PALETTE[v]
+			var dx := xx
+			var dy := yy
+			if yy < 17:
+				dy += bob
+			else:
+				dx += leg if xx < 8 else -leg
+			ci.draw_rect(Rect2(round(x + dx * sc), round(y + dy * sc), sc, sc), c, true)
+
+
 ## Element sigils, used on the level-up cards and in creation.
 static func elem_icon(ci: CanvasItem, e: Dictionary, cx: float, cy: float, t: float, lit: bool) -> void:
 	var col := Color(e.col)
