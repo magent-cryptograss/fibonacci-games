@@ -147,9 +147,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_flood(c, brush)
 				_say("filled")
 		KEY_S:
-			var p := MapIO.save(map)
-			_say("saved -> " + p if p != "" else "SAVE FAILED")
-			print("[editor] saved %s -> %s" % [map.id, p])
+			var res: Array = MapIO.save(map)
+			var p: String = res[0]
+			var note: String = res[1]
+			if p == "":
+				_say("SAVE FAILED: " + note)
+			else:
+				var layer := "project" if MapIO.can_write_res() else "scratch"
+				_say("saved to %s%s" % [layer, note])
+			print("[editor] saved %s -> %s%s" % [map.id, p, note])
 		KEY_R:
 			var fresh := MapIO.load_map(map.id)
 			if fresh != null:

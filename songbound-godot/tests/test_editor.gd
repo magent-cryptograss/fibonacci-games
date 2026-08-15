@@ -74,9 +74,13 @@ func _logic() -> void:
 	_expect(n_npcs >= 2, "npc placed (%d on map)" % n_npcs)
 	_expect(ed.map.start == Vector2i(5, 7), "start moved")
 
-	var path: String = MapIO.save(ed.map)
+	var saved: Array = MapIO.save(ed.map)
+	var path: String = saved[0]
 	_expect(path != "", "saved to %s" % path)
 	_expect(MapIO.has_saved("house1"), "save file exists")
+	# in the editor this must be the committed copy, not the scratch layer
+	_expect(MapIO.can_write_res(), "running with a writable res:// (editor build)")
+	_expect(path.ends_with("maps/house1.json"), "wrote to the project maps folder")
 
 	# round trip
 	var reloaded := MapIO.load_map("house1")
@@ -106,10 +110,33 @@ func _logic() -> void:
 	_expect(live.start == Vector2i(5, 7), "saved map overrides the generated one")
 	_expect(live.texture != null, "overridden map got prerendered")
 
-	# clean up so the game does not ship with a test map
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(MapIO.path_for("house1")))
+	# the scratch layer must win over the shipped copy
+	MapIO.ensure_dir(MapIO.USER_DIR)
+	var scratch: Maps.GameMap = MapIO.load_map("house1")
+	scratch.start = Vector2i(3, 3)
+	var uf := FileAccess.open(MapIO.path_in(MapIO.USER_DIR, "house1"), FileAccess.WRITE)
+	uf.store_string(JSON.stringify(MapIO.to_dict(scratch), "\t"))
+	uf.close()
 	World.maps.clear()
-	_expect(not MapIO.has_saved("house1"), "test map cleaned up")
+	var layered: Maps.GameMap = World.build_all()["house1"]
+	_expect(layered.start == Vector2i(3, 3), "scratch layer overrides the project copy")
+
+	# saving again from the editor should clear the stale scratch file, so what
+	# you just saved is what the game actually loads
+	ed.map = layered
+	ed.map.start = Vector2i(5, 7)
+	var again: Array = MapIO.save(ed.map)
+	_expect(again[1] != "", "saving cleared the stale scratch copy%s" % again[1])
+	_expect(not FileAccess.file_exists(MapIO.path_in(MapIO.USER_DIR, "house1")),
+		"scratch file really is gone")
+	World.maps.clear()
+	_expect(World.build_all()["house1"].start == Vector2i(5, 7), "the save is what loads")
+
+	# clean up so the repo does not gain a test map
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(MapIO.path_in(MapIO.RES_DIR, "house1")))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(MapIO.path_in(MapIO.USER_DIR, "house1")))
+	World.maps.clear()
+	_expect(not MapIO.has_saved("house1"), "test map cleaned up from both layers")
 	print("")
 
 

@@ -1,28 +1,54 @@
 class_name MapIO
 extends RefCounted
-## Maps as JSON on disk, so the editor can own them instead of the code.
+## Maps as JSON on disk, in two layers.
 ##
-## World.gd still generates a default world. Any map with a saved file
-## overrides the generated one at load, which means you can redraw one corner of
-## the game without touching anything else.
+##   res://maps/   the real ones. Committed to git, shipped with the game.
+##   user://maps/  a scratch layer on top, for trying something without
+##                 committing it. Delete the scratch file to revert.
+##
+## The game loads res:// first and lays user:// over it, so user:// always wins
+## at runtime. The editor writes to res:// when it can -- which is whenever you
+## run from inside Godot -- and falls back to user:// in an exported build,
+## where res:// is read-only.
 
-const DIR := "user://maps/"
+const RES_DIR := "res://maps/"
+const USER_DIR := "user://maps/"
+
+
+## True when running from the Godot editor, where res:// is a real folder on
+## disk. False in an exported build, where it lives inside the .pck and cannot
+## be written to.
+static func can_write_res() -> bool:
+	return OS.has_feature("editor")
+
+
+static func write_dir() -> String:
+	return RES_DIR if can_write_res() else USER_DIR
+
+
+static func ensure_dir(d: String) -> void:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(d))
 
 
 static func dir_path() -> String:
-	return ProjectSettings.globalize_path(DIR)
+	return ProjectSettings.globalize_path(write_dir())
 
 
-static func ensure_dir() -> void:
-	DirAccess.make_dir_recursive_absolute(dir_path())
+static func path_in(dir: String, id: String) -> String:
+	return dir + id + ".json"
 
 
-static func path_for(id: String) -> String:
-	return DIR + id + ".json"
+## Where this map would actually load from, honouring the layering.
+static func effective_path(id: String) -> String:
+	if FileAccess.file_exists(path_in(USER_DIR, id)):
+		return path_in(USER_DIR, id)
+	if FileAccess.file_exists(path_in(RES_DIR, id)):
+		return path_in(RES_DIR, id)
+	return ""
 
 
 static func has_saved(id: String) -> bool:
-	return FileAccess.file_exists(path_for(id))
+	return effective_path(id) != ""
 
 
 static func to_dict(m: Maps.GameMap) -> Dictionary:
@@ -53,14 +79,24 @@ static func _strip_runtime(npcs: Array) -> Array:
 	return out
 
 
-static func save(m: Maps.GameMap) -> String:
-	ensure_dir()
-	var f := FileAccess.open(path_for(m.id), FileAccess.WRITE)
+## Returns [absolute_path, note]. The note mentions a scratch file that was
+## cleared, so saving never silently leaves a stale override in front of the
+## map you just wrote.
+static func save(m: Maps.GameMap) -> Array:
+	var dir := write_dir()
+	ensure_dir(dir)
+	var f := FileAccess.open(path_in(dir, m.id), FileAccess.WRITE)
 	if f == null:
-		return ""
+		return ["", "could not open %s for writing" % path_in(dir, m.id)]
 	f.store_string(JSON.stringify(to_dict(m), "\t"))
 	f.close()
-	return ProjectSettings.globalize_path(path_for(m.id))
+	var note := ""
+	# If we just wrote the shipped copy, a leftover scratch copy would still win
+	# at load time and quietly hide this save.
+	if dir == RES_DIR and FileAccess.file_exists(path_in(USER_DIR, m.id)):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path_in(USER_DIR, m.id)))
+		note = " (cleared scratch copy)"
+	return [ProjectSettings.globalize_path(path_in(dir, m.id)), note]
 
 
 static func from_dict(d: Dictionary) -> Maps.GameMap:
@@ -80,36 +116,53 @@ static func from_dict(d: Dictionary) -> Maps.GameMap:
 	return m
 
 
-static func load_map(id: String) -> Maps.GameMap:
-	if not has_saved(id):
+static func _read(path: String) -> Maps.GameMap:
+	if not FileAccess.file_exists(path):
 		return null
-	var f := FileAccess.open(path_for(id), FileAccess.READ)
+	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		return null
 	var parsed = JSON.parse_string(f.get_as_text())
 	f.close()
 	if typeof(parsed) != TYPE_DICTIONARY:
+		push_warning("map file is not valid JSON: " + path)
 		return null
 	return from_dict(parsed)
 
 
-## Overlay every saved map on top of the generated set.
-static func apply_overrides(maps: Dictionary) -> int:
-	ensure_dir()
-	var n := 0
-	var d := DirAccess.open(DIR)
+static func load_map(id: String) -> Maps.GameMap:
+	var p := effective_path(id)
+	return _read(p) if p != "" else null
+
+
+static func _ids_in(dir: String) -> Array:
+	var out := []
+	var d := DirAccess.open(dir)
 	if d == null:
-		return 0
+		return out
 	d.list_dir_begin()
 	var fname := d.get_next()
 	while fname != "":
+		# exported builds append .remap to res:// files
 		if fname.ends_with(".json"):
-			var id := fname.get_basename()
-			var m := load_map(id)
-			if m != null:
-				Maps.prerender(m)
-				maps[id] = m
-				n += 1
+			out.append(fname.get_basename())
+		elif fname.ends_with(".json.remap"):
+			out.append(fname.get_basename().get_basename())
 		fname = d.get_next()
 	d.list_dir_end()
+	return out
+
+
+## Lay the shipped maps down first, then the scratch layer on top.
+static func apply_overrides(maps: Dictionary) -> int:
+	ensure_dir(USER_DIR)
+	var n := 0
+	for dir in [RES_DIR, USER_DIR]:
+		for id in _ids_in(dir):
+			var m := _read(path_in(dir, id))
+			if m == null:
+				continue
+			Maps.prerender(m)
+			maps[id] = m
+			n += 1
 	return n

@@ -3,13 +3,30 @@
 Open the Godot project, select `scenes/MapEditor.tscn`, and press **F6** (run
 current scene). Or set it as the main scene while you work.
 
-Maps you save land in `user://maps/*.json`, which on this machine is:
+## Where your maps go
 
-    ~/.local/share/godot/app_userdata/SONGBOUND/maps/
+Two layers, and the editor picks the right one for you.
 
-The game loads those on top of the generated world, so **a saved map wins over
-the code-generated one**. You can redraw one corner of the game and leave
-everything else alone. Delete the JSON to go back to the generated version.
+| | |
+|---|---|
+| `maps/` in the project | **the real ones.** Committed to git, ship with the game |
+| `user://maps/` | a scratch layer laid on top, for trying something uncommitted |
+
+On this machine the scratch folder is
+`~/.local/share/godot/app_userdata/SONGBOUND/maps/`.
+
+Pressing `S` writes to the **project** folder whenever it can, which is
+whenever you run from inside Godot. It only falls back to scratch in an
+exported build, where `res://` is read-only. The status line tells you which
+one it used.
+
+A saved map overrides the world `World.gd` generates in code, so you can redraw
+one corner of the game and leave everything else alone. Delete the JSON to go
+back to the generated version.
+
+Saving to the project folder also **clears any stale scratch copy of that map**,
+because otherwise the scratch file would still win at load time and quietly
+hide the thing you just saved.
 
 ## Controls
 
@@ -84,12 +101,12 @@ It also flood-fills the overworld from the town gate and fails if the cave
 mouth has become unreachable — which is exactly the bug that carving a road
 before stamping a mountain ring produced the first time.
 
-## Getting your maps into the repo
+## Committing your maps
 
-`user://` is outside the project. When you have a map you want to keep, copy
-the JSON into the project and it can be committed:
+Nothing to do: `S` already writes into `maps/` in the project, so
+`git add maps/` and they are in. They are plain JSON and diff readably --
+`tiles` is just the map left to right, top to bottom, one character per tile.
 
-    cp ~/.local/share/godot/app_userdata/SONGBOUND/maps/town.json <project>/maps/
-
-Loading from `res://maps/` isn't wired up yet — say the word and I'll add it so
-saved maps ship with the game rather than living in your user directory.
+If you want to try a change *without* committing it, edit and save from an
+exported build, or drop a copy into `user://maps/` by hand. That file wins
+until you delete it.
