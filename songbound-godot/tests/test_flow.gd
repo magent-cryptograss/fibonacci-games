@@ -1,7 +1,12 @@
 extends Node2D
-## Drives the whole loop -- title, field, battle, level-up, ending -- and
-## screenshots each. Catches the wiring mistakes that only appear when the
+## Drives the whole loop -- title, field, battle, level-up, menu, shop, ending --
+## and screenshots each. Catches the wiring mistakes that only appear when the
 ## scenes are actually talking to each other.
+##
+## Note the shape of the step list: a step either CHANGES something or TAKES A
+## PICTURE, never both. get_viewport().get_texture() returns the frame that has
+## already been drawn, so shooting in the same step as the change captures the
+## previous screen and silently mislabels every shot.
 
 const OUT_DIR := "user://shots/"
 
@@ -44,8 +49,8 @@ func _process(_d: float) -> void:
 			print("")
 			print("== full flow ==")
 			_expect(main.state == main.S.TITLE, "boots to the title")
-			_shot("title")
-		1:
+		1: _shot("title")
+		2:
 			# make a character the way creation would, then walk into the world
 			Game.new_game("Wren", "banjo", Sprites.build(Sprites.PRESETS[1].opts), "fire")
 			_expect(Game.player != null, "player created")
@@ -53,37 +58,35 @@ func _process(_d: float) -> void:
 			main._enter_field("town", Vector2i(15, 22))
 			_expect(main.state == main.S.FIELD, "entered the field")
 			_expect(main.current.map.id == "town", "in town")
-		2:
-			main.current.say(Story.OPENING)
-			_shot("opening")
-		3:
+		3: _shot("town")
+		4: main.current.say(Story.OPENING)
+		5: _shot("opening")
+		6:
 			main.current.msg = null
-			_shot("town")
-			# an ordinary fight
 			main._start_battle("meadow", "", "")
 			_expect(main.state == main.S.BATTLE, "battle started")
-			_expect(main.current.enemies.size() >= 1, "%d creature(s) turned up" % main.current.enemies.size())
-		4:
-			_shot("battle-intro")
-		5:
+			_expect(main.current.enemies.size() >= 1,
+				"%d creature(s) turned up" % main.current.enemies.size())
+		7: _shot("battle-intro")
+		8:
 			var b: Node = main.current
 			b.phase = "command"
-			_shot("battle-command")
 			_expect(b.alive().size() > 0, "creatures alive at the command prompt")
-		6:
+		9: _shot("battle-command")
+		10:
 			var b: Node = main.current
 			b.phase = "songmenu"
 			b.sel = 0
-			_shot("battle-songs")
-			# cast the first song for real and check breath is spent
+		11: _shot("battle-songs")
+		12:
+			var b: Node = main.current
 			var before_br: int = Game.player.br
 			var songs: Array = Game.player.song_book()
 			b.do_song(songs[0], 0)
-			_expect(Game.player.br < before_br, "casting spent breath (%d -> %d)" % [before_br, Game.player.br])
-		7:
-			_shot("battle-song-fx")
-		8:
-			# win it outright and check the reward path
+			_expect(Game.player.br < before_br,
+				"casting spent breath (%d -> %d)" % [before_br, Game.player.br])
+		13: _shot("battle-song-fx")
+		14:
 			var b: Node = main.current
 			for e in b.enemies:
 				e.hp = 0
@@ -91,31 +94,42 @@ func _process(_d: float) -> void:
 			b._end(true)
 			_expect(b.phase == "victory", "victory screen reached")
 			_expect(b.reward.xp > 0, "xp awarded (%d)" % b.reward.xp)
-			_shot("battle-victory")
-		9:
-			# force enough levels that the level-up screen has to appear
+		15: _shot("battle-victory")
+		16:
 			Game.award_xp(4000)
 			_expect(not Game.level_queue.is_empty(), "levels queued (%d)" % Game.level_queue.size())
 			main._on_battle_done("win")
 			_expect(main.state == main.S.LEVELUP, "level-up screen shown")
-		10:
-			_shot("levelup")
+		17: _shot("levelup")
+		18:
 			var lu: Node = main.current
 			var songs_before: int = Game.player.songs.size()
 			lu.sel = 1                       # first element card
 			lu._choose()
 			_expect(lu.phase == "result", "a choice was applied")
 			_expect(Game.player.songs.size() >= songs_before, "song book did not shrink")
-		11:
-			_shot("levelup-result")
-		12:
-			# the shop, reached the way an NPC would open it
+		19: _shot("levelup-result")
+		20:
+			# the pause menu, sitting over a live field
+			main._enter_field("town", Vector2i(15, 22))
+			main._on_menu()
+			_expect(main.menu != null, "menu opened")
+			_expect(not main.current.is_processing(), "field frozen while the menu is up")
+		21: _shot("menu-status")
+		22: main.menu.page = "songs"
+		23: _shot("menu-songs")
+		24: main.menu.page = "items"
+		25: _shot("menu-items")
+		26:
+			main._close_menu()
+			_expect(main.menu == null, "menu closed")
+			_expect(main.current.is_processing(), "field resumed")
+		27:
 			main._on_shop(["tonic", "rosin", "strings"])
 			_expect(main.state == main.S.SHOP, "shop opened")
-			_shot("shop")
-		13:
+		28: _shot("shop")
+		29:
 			main.state = main.S.FIELD
-			# and the ending
 			main._start_ending()
 			_expect(main.state == main.S.ENDING, "ending started")
 			_expect(main.end_lines.size() > 20, "%d ending lines" % main.end_lines.size())
@@ -124,13 +138,11 @@ func _process(_d: float) -> void:
 				if PixelFont.width(l) > UI.SCREEN_W:
 					too_wide += 1
 			_expect(too_wide == 0, "no ending line is wider than the screen")
-		14:
-			main.end_t = 6.0
-			_shot("ending")
-		15:
-			main.end_t = 22.0
-			_shot("ending-late")
-		16:
+		30: main.end_t = 6.0
+		31: _shot("ending")
+		32: main.end_t = 22.0
+		33: _shot("ending-late")
+		34:
 			print("")
 			print("FAILURES: %d" % failures if failures > 0 else "FLOW TESTS PASSED")
 			get_tree().quit(1 if failures > 0 else 0)

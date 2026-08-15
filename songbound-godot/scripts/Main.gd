@@ -24,6 +24,9 @@ const CREATION := preload("res://scenes/Creation.tscn")
 const FIELD := preload("res://scenes/Field.tscn")
 const BATTLE := preload("res://scenes/Battle.tscn")
 const LEVELUP := preload("res://scenes/LevelUp.tscn")
+const MENU := preload("res://scenes/Menu.tscn")
+
+var menu: Node2D = null
 
 
 func _ready() -> void:
@@ -76,6 +79,7 @@ func _enter_field(map_id: String, at: Vector2i) -> void:
 	f.boss_encounter.connect(_on_boss)
 	f.open_shop.connect(_on_shop)
 	f.open_inn.connect(_on_inn)
+	f.open_menu.connect(_on_menu)
 	f.enter(map_id, at, Game.facing)
 	Audio.play_music(f.map.music)
 
@@ -129,6 +133,26 @@ func _after_battle() -> void:
 		fade_to(func() -> void: _start_ending(), 1.5)
 		return
 	fade_to(func() -> void: _enter_field(Game.map_id, Game.tile_pos))
+
+
+## The menu sits on top of a frozen field rather than replacing it, so closing
+## it puts you back exactly where you stood.
+func _on_menu() -> void:
+	if menu != null:
+		return
+	menu = MENU.instantiate()
+	add_child(menu)
+	menu.closed.connect(_close_menu)
+	if current != null:
+		current.set_process(false)
+
+
+func _close_menu() -> void:
+	if menu != null:
+		menu.queue_free()
+		menu = null
+	if current != null:
+		current.set_process(true)
 
 
 func _on_shop(list: Array) -> void:
