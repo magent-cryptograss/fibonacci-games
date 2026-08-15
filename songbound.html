@@ -22,7 +22,7 @@ canvas { image-rendering: pixelated; image-rendering: crisp-edges; border: 2px s
 // A 16-bit style RPG where music replaces magic.
 // ============================================================================
 const TITLE = 'SONGBOUND';
-const SUBTITLE = 'a song against the quiet';
+const SUBTITLE = 'what the instruments remember';
 
 const W = 320, H = 240, SCALE = 3;
 const canvas = document.getElementById('game');
@@ -2167,20 +2167,25 @@ function buildTown() {
   // exit south to the world
   mset(m, 15, h - 3, 'o'); mset(m, 15, h - 2, 'o'); mset(m, 15, h - 1, 'o');
   m.warps.push({ x: 15, y: h - 1, to: 'world', tx: 20, ty: 53 });
-  m.npcs.push({ x: 9, y: 12, sign: true, lines: ['INN, west.  SUPPLIES, east.', 'Mind the quiet on the road north.'] });
+  m.npcs.push({ x: 9, y: 12, sign: true, lines: ['INN, west.  SUPPLIES, east.', 'MENDING, the shop with the green door. Ask for Halloway.', '(Somebody has scratched out the last line.)'] });
   m.npcs.push({ x: 12, y: 15, look: 'oldman', dir: 'down',
-    lines: ['It started with the small tunes. Cradle songs. Counting rhymes.',
-            "Nobody noticed until a whole reel went missing out of somebody's hands, mid-bar.",
-            'You play, do you? Then you had best play loud.'] });
+    lines: ["Halloway mended my father's fiddle when I was a boy. Mended it twice.",
+            'Second time it had gone feral in a barn six years and taken a finger off the man who found it. She had it sweet again by Sunday.',
+            'That was the trade. Mending, where mending was possible.',
+            'It is not, any more. What is coming out of those hills is years past helping and every one of us knows it.',
+            'And they will not look like instruments. A left thing takes the shape of the last thing that heard it -- a fiddle rotting in a briar patch comes back briar, a horn left in a field comes back with horns on it.',
+            'Whatever shape it wears, it is a song with nobody holding it, and it has gone rotten in there. Break it clean. Do not make it last.'] });
   m.npcs.push({ x: 20, y: 13, look: 'kid', dir: 'left', wander: true,
-    lines: ['I know six songs!', '...I knew seven.'] });
+    lines: ['I know six songs!', '...I knew seven.',
+            'I have been looking for the other one all morning. It is not anywhere. It is not even in the place where it was.'] });
   m.npcs.push({ x: 6, y: 23, look: 'woman', dir: 'right',
-    lines: ['My grandmother could name every element by the sound it made.',
-            'Fire crackles. Water answers. Plant does not hurry.',
-            'Ice, electric, earth, wind, dark. Learn what you like. They all count.'] });
+    lines: ['My grandmother could name an element by the sound it made when it went wrong.',
+            'Fire crackles. Water answers back. Plant does not hurry. Ice takes its time on purpose.',
+            'Electric, earth, wind, dark. Pick whichever suits your hands. They all hold a song just as well as any other.'] });
   m.npcs.push({ x: 24, y: 12, look: 'drifter', dir: 'down',
-    lines: ['Every fifth level a song settles in you. First one, then five, ten, on up.',
-            'The levels between? Those just make you harder to knock down.'] });
+    lines: ['Every fifth level a song settles into you for good. The first one, then five, ten, on up to a hundred if you live.',
+            'The levels between only make you harder to knock down. That is not nothing.',
+            'Stay with one element and you will learn all eight of its songs and play them like you were born holding it. Spread yourself across all eight and you will know a little of everything. Both work. They do not work the same.'] });
   m.start = { x: 15, y: 22 };
   MAPS.town = m;
 }
@@ -2205,7 +2210,8 @@ function buildInteriors() {
   rect(inn, 2, 3, 2, 2, 'b'); rect(inn, 5, 3, 2, 2, 'b'); rect(inn, 8, 3, 2, 2, 'b');
   mset(inn, 10, 6, 'c'); mset(inn, 11, 6, 'c');
   inn.npcs.push({ x: 10, y: 5, look: 'shopkeep', dir: 'down', inn: 30,
-    lines: ['Rest here? Thirty coin, and you wake up whole.'] });
+    lines: ['Rest here? Thirty coin and you wake up whole.',
+            'Halloway never paid it once. Slept on the bench by the fire like an old dog and left before I was up.'] });
   MAPS.inn = inn;
 
   // supplies
@@ -2214,22 +2220,27 @@ function buildInteriors() {
   rect(shop, 2, 3, 1, 2, 'p'); rect(shop, 10, 3, 1, 2, 'p');
   shop.npcs.push({ x: 6, y: 4, look: 'shopkeep', dir: 'down',
     shop: ['tonic', 'tonic2', 'rosin', 'rosin2', 'salve', 'bread', 'strings', 'charm'],
-    lines: ['Everything a body needs to keep singing.'] });
+    lines: ['Rosin, strings, and something for your throat.',
+            'Halloway bought the same four things off me for forty years and never once said what they were for.'] });
   MAPS.shop = shop;
 
   const h1 = buildRoom('house1', 11, 10, { back: 'town', backX: 7, backY: 21 });
   rect(h1, 2, 3, 2, 2, 'b'); mset(h1, 6, 4, 't'); mset(h1, 8, 6, 'p');
   h1.npcs.push({ x: 6, y: 5, look: 'preacher', dir: 'down',
-    lines: ['I keep a list of what we have lost. It is four pages now.',
-            'Add nothing to it, if you can help it.'] });
+    lines: ['I keep a list of what we have lost. It is four pages, and you are about to make it longer.',
+            'I do not blame you for it. Somebody has to go down there. But every one you put down is a song that stops existing, and I would rather one of us was counting.',
+            'Not the songs themselves -- I cannot write down a song, and if I could the paper would rot and take it with it. I write down the holes.',
+            '"A tune about a river." "The counting rhyme with the crow in it." "A man\'s name."',
+            'That last one has been on the list since my grandfather. Nobody has ever been able to tell me whose.'] });
   h1.chests.push({ x: 2, y: 6, item: 'tonic', id: 'h1a' });
   MAPS.house1 = h1;
 
   const h2 = buildRoom('house2', 11, 10, { back: 'town', backX: 23, backY: 21 });
   mset(h2, 3, 4, 't'); mset(h2, 7, 4, 't'); rect(h2, 2, 6, 1, 2, 'p');
   h2.npcs.push({ x: 5, y: 5, look: 'miner', dir: 'down',
-    lines: ['Worked that cave nine years. Never heard it hum before this spring.',
-            'Now it hums all night, and none of us can name the key.'] });
+    lines: ['Worked that cave nine years. It never hummed before this spring.',
+            'Now it hums all night and not one of us can name the key.',
+            'There is something down there that used to be an instrument. Several somethings. They are stacked up in order, is the part I cannot stop thinking about. Like somebody walked down and set them each in their place.'] });
   h2.chests.push({ x: 8, y: 6, item: 'charm', id: 'h2a' });
   MAPS.house2 = h2;
 }
@@ -2274,8 +2285,10 @@ function buildCaves() {
   c2.warps.push({ x: 6, y: 23, to: 'cave1', tx: 33, ty: 8 });
   c2.chests.push({ x: 24, y: 9, item: 'strings', id: 'c2a' });
   c2.boss = { x: 17, y: 5, id: 'gravebell', flag: 'gravebell',
-              intro: ['Something hangs in the dark ahead of you.',
-                      'It has no clapper, and it is ringing anyway.'] };
+              intro: ['A bell hangs in the dark ahead of you, and it has no clapper.',
+                      'It is ringing anyway. It has been ringing for somebody since before your grandmother was born, and it cannot remember who.',
+                      'A bell is an instrument. This one was left, and it is far too late for it.',
+                      'You get the hammer out.'] };
   carve2(17, 3, 2);
   mset(c2, 17, 2, '*');
   c2.warps.push({ x: 17, y: 2, to: 'cave3', tx: 5, ty: 20, needFlag: 'boss_gravebell',
@@ -2300,9 +2313,10 @@ function buildCaves() {
   c3.chests.push({ x: 25, y: 8, item: 'tonic2', id: 'c3a' });
   c3.chests.push({ x: 11, y: 11, item: 'rosin2', id: 'c3b' });
   c3.boss = { x: 16, y: 4, id: 'conductor', flag: 'conductor',
-              intro: ['A tall shape is standing with its back to you, keeping time.',
-                      'There is no band. There has not been a band for a long while.',
-                      'It raises the baton anyway.'] };
+              intro: ['A tall shape stands with its back to you, keeping time.',
+                      'There is no band. There has not been a band down here in a hundred years.',
+                      'It is still counting them in. It has counted them in every bar of every one of those years, waiting for somebody to play.',
+                      'You are somebody. This is going to be the worst one.'] };
   mset(c3, 16, 1, '*');
   c3.warps.push({ x: 16, y: 1, to: 'final', tx: 10, ty: 17, needFlag: 'boss_conductor',
                   blocked: 'The conductor has not finished.' });
@@ -2319,6 +2333,10 @@ function buildCaves() {
   f.boss = { x: 10, y: 7, id: 'quiet', flag: 'quiet',
              intro: ['There is nothing here.',
                      'Not an empty room. A nothing, sitting in a room, with mouths.',
+                     'It was a man once. He did a thing worth remembering him for, and he did not want to be remembered for it.',
+                     'So he gave away his voice, so that he could never be named. And then he walked the hills for a hundred years leaving instruments behind him, one for every song that knew what he had done.',
+                     'He left them long enough that nobody could ever bring one back. He was not hiding the evidence. He was making evidence that whoever came for him would have to destroy with their own hands.',
+                     'You have been breaking them all the way down. Every one. He counted on that.',
                      'You take a breath. It is the loudest thing in the world.'] };
   f.start = { x: 10, y: 17 };
   MAPS.final = f;
@@ -2376,9 +2394,13 @@ function startGame() {
   G.steps = 0; G.encCool = 8;
   setScene('field');
   G.msg = { lines: [
-    'You wake with a tune half-remembered and no name for it.',
-    'Somewhere north of here, something is taking the songs.',
-    'Best go and be loud about it.'
+    'Halloway is three days buried. The shop is yours now, such as it is.',
+    'She taught you the rule before she taught you the trade. Paper rots. Stone wears smooth. A song passed hand to hand outlasts them both, and that is the only reason anybody remembers anything at all.',
+    'She taught you the other rule too. An instrument that is loved and then abandoned does not die. It keeps the song and forgets the hands, and a thing like that turns mean.',
+    'And then she taught you the hard part, which is that past a certain point there is no mending one. The song inside has gone bad and there is no getting it back out. All you can do is break the thing, and be quick, and not stand about afterwards.',
+    'There are a great many of them coming up out of the hills this year. Far more than there ought to be.',
+    'Somebody is leaving them behind on purpose.',
+    'You pack her kit -- rosin, spare strings, the little hammer -- and you go north, toward the humming.'
   ], i: 0 };
   music.play('town', TUNES.town);
 }
@@ -2444,7 +2466,7 @@ function interact() {
   // a well, a sign you are standing on, etc.
   const here = mget(m, f.x, f.y);
   if (here === 'w') { G.msg = { lines: ['The water is very still. It does not echo.'], i: 0 }; return true; }
-  if (here === 'g') { G.msg = { lines: ['The name has worn off. Somebody still leaves flowers.'], i: 0 }; return true; }
+  if (here === 'g') { G.msg = { lines: ['HALLOWAY, it says. She cut the letters herself years back and complained about stone the entire time.', 'Three days, and they are already going faint.'], i: 0 }; return true; }
   if (here === 'b') { G.msg = { lines: ['A bed. Not yours.'], i: 0 }; return true; }
   return false;
 }
@@ -2622,8 +2644,20 @@ function drawFieldHUD() {
 }
 
 // ---- message box ----
+const MSG_ROWS = 4, MSG_PX = W - 40;
+// Split each written passage into pages that actually fit the box, so a long
+// line does not simply run off the bottom edge and lose its last clause.
+function pageLines(lines, pxw, rows) {
+  const out = [];
+  for (const l of lines) {
+    const w = wrap(l, pxw);
+    for (let i = 0; i < w.length; i += rows) out.push(w.slice(i, i + rows).join('\n'));
+  }
+  return out.length ? out : [''];
+}
 function updateMessage(dt) {
   const m = G.msg;
+  if (!m.paged) { m.lines = pageLines(m.lines, MSG_PX, MSG_ROWS); m.paged = true; m.i = 0; m.tick = 0; }
   m.tick = (m.tick || 0) + dt;
   const full = m.lines[m.i] || '';
   const shown = Math.floor(m.tick / 14);
@@ -2649,7 +2683,7 @@ function drawMessage() {
   drawWindow(bx, by, bw, bh);
   const full = m.lines[m.i] || '';
   const shown = full.slice(0, Math.floor((m.tick || 0) / 14));
-  const lines = wrap(shown, bw - 24);
+  const lines = wrap(shown, MSG_PX).slice(0, MSG_ROWS);
   lines.forEach((l, i) => drawText(l, bx + 12, by + 12 + i * 12, '#f4f0e8'));
   if (Math.floor((m.tick || 0) / 14) >= full.length) {
     const bob = Math.sin(G.t / 180) > 0 ? 0 : 1;
@@ -3327,7 +3361,7 @@ function drawBattleUI() {
   if (BT.phase === 'victory') {
     const r = BT.reward;
     drawWindow(70, 70, 180, 96);
-    drawTextC('The air is loud again.', 160, 80, '#ffe08a', { outline: true });
+    drawTextC('One more gone for good.', 160, 80, '#ffe08a', { outline: true });
     drawText('Experience', 84, 100, '#c0b8d8'); drawTextR(String(r.xp), 236, 100, '#f4f0e8');
     drawText('Coin', 84, 114, '#c0b8d8'); drawTextR(String(r.gold), 236, 114, '#f4f0e8');
     if (r.levels.length) drawTextC('Level ' + r.levels[r.levels.length - 1] + '!', 160, 132, '#90e8b0', { outline: true });
@@ -3772,15 +3806,53 @@ const END = { t: 0, lines: [
   'The Quiet comes apart the way a held note does,',
   'thinning out until you cannot say where it stopped.',
   '',
-  'What comes back is small at first.',
-  'A counting rhyme, in a house at the end of the road.',
-  'A cradle song somebody had been humming wrong for a year',
-  'and suddenly gets right.',
+  'What is left on the floor is a reed pipe.',
+  'River cane, cut badly. Four holes, and a fifth',
+  'started and given up on. Nothing special about it,',
+  'except that it is the first one anybody ever made.',
   '',
-  'Nobody thanks you, because nobody remembers',
-  'there was ever anything missing.',
+  'He made it. Then he left it behind,',
+  'and left everything after it, all the way down,',
+  'and spent a hundred years making certain',
+  'that no song anywhere could say his name.',
   '',
-  'That is the job.',
+  '',
+  'You broke a great many things to stand here.',
+  'Not one of them could have been saved.',
+  'He was careful about that. He left them long enough',
+  'that the mending kit on your back was a joke',
+  'somebody played on you before you were born.',
+  '',
+  '',
+  'This one is whole.',
+  '',
+  'He came back for it. Nothing else explains it.',
+  'Came back over a hundred years, again and again,',
+  'and could never once make himself finish the job.',
+  '',
+  '',
+  'It takes most of an hour. It is not hard work.',
+  'Halloway taught you harder in your first winter.',
+  '',
+  'You put it to your mouth. It plays unasked,',
+  'and what it plays is a name.',
+  '',
+  '',
+  'Tobin.',
+  '',
+  '',
+  'That is all it was. A plain name, an ordinary one,',
+  'the kind that turns up twice in any village,',
+  'and he burned a century to keep it out of your mouth.',
+  '',
+  '',
+  'You carry it home the long way, over the crag.',
+  'You give the pipe to the child who lost a song.',
+  'She has it by Sunday, and teaches it onward,',
+  '',
+  'and it goes on from there, hand to hand,',
+  'which is the only way anything has ever lasted,',
+  'and the only thing he never found a way to break.',
   '',
   '', '',
   'SONGBOUND'
@@ -3804,12 +3876,20 @@ function drawEnding() {
     const c = ['#6038a0', '#2068a8', '#3a8828', '#a03878'][i % 4];
     px(ctx, x, y, 3, 3, c); px(ctx, x + 2, y - 5, 1, 6, c);
   }
+  // wrap once and cache: any line longer than the screen would otherwise run
+  // off both edges, since the crawl is centre-aligned
+  if (!END.render) {
+    END.render = [];
+    END.lines.forEach(l => {
+      if (l === '' || l === TITLE) { END.render.push(l); return; }
+      wrap(l, W - 24).forEach(w => END.render.push(w));
+    });
+  }
   const scroll = Math.max(0, (END.t - 600) / 46);
-  END.lines.forEach((l, i) => {
+  END.render.forEach((l, i) => {
     const y = H + 10 + i * 14 - scroll;
     if (y < -12 || y > H + 12) return;
-    const last = i === END.lines.length - 1;
-    if (last) drawTitleWord(l, 160, y);
+    if (l === TITLE) drawTitleWord(l, 160, y);
     else drawTextC(l, 160, y, '#d8d0e8', { outline: true });
   });
   if (END.t > 2000) drawTextC('Z', 160, 228, '#5a5470');
