@@ -53,11 +53,16 @@ func _render(voice: String, freq: float, dur: float, bright: float) -> AudioStre
 		var s := 0.0
 		match voice:
 			"pluck":
-				# two detuned saws through a closing lowpass
+				# two detuned saws through a lowpass that closes as the note decays.
+				# The cutoff has to be derived from the note's own frequency: a
+				# fixed coefficient is a fixed cutoff in Hz, which turned every
+				# pitch into the same muffled thud around 140 Hz.
 				phase = fmod(phase + step, 1.0)
 				phase2 = fmod(phase2 + step * 2.002, 1.0)
 				var raw := (phase * 2.0 - 1.0) + (phase2 * 2.0 - 1.0) * 0.3
-				var cut := clampf(0.02 + (bright / 200.0) * pow(1.0 - float(i) / n, 2.0), 0.01, 0.9)
+				var openness := 1.0 - 0.7 * (float(i) / n)
+				var fc := clampf(freq * bright * openness, 80.0, MIX_RATE * 0.45)
+				var cut := 1.0 - exp(-TAU * fc / MIX_RATE)
 				lp += (raw - lp) * cut
 				s = lp * _env(i, n, 0.004, 2.4)
 			"bow":
@@ -77,7 +82,9 @@ func _render(voice: String, freq: float, dur: float, bright: float) -> AudioStre
 			"bass":
 				phase = fmod(phase + step, 1.0)
 				var tri := absf(phase * 4.0 - 2.0) - 1.0
-				lp += (tri - lp) * 0.08
+				# same lesson: cutoff tracks the note, a few harmonics above it
+				var bfc := clampf(freq * 5.0, 100.0, MIX_RATE * 0.45)
+				lp += (tri - lp) * (1.0 - exp(-TAU * bfc / MIX_RATE))
 				s = lp * _env(i, n, 0.01, 1.6)
 			"noise":
 				s = (rng.randf() * 2.0 - 1.0) * _env(i, n, 0.001, 3.0)
@@ -308,6 +315,126 @@ func play_song(elem: String, inst: Dictionary) -> void:
 		# staggered by hand rather than with timers: five short one-shots
 		get_tree().create_timer(i * 0.075).timeout.connect(
 			func() -> void: _play(voice, f, 0.4, -13.0, inst.get("bright", 8.0)))
+
+
+## ----------------------------------------------------------------------------
+## Offline rendering. This machine has no audio device, so the only way to know
+## what the synth actually sounds like is to mix a tune down to a file and
+## listen to it somewhere else.
+## ----------------------------------------------------------------------------
+
+## Decode a rendered note back to float samples so it can be mixed.
+func _samples_of(w: AudioStreamWAV) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	var n := int(w.data.size() / 2)
+	out.resize(n)
+	for i in n:
+		var lo := w.data[i * 2]
+		var hi := w.data[i * 2 + 1]
+		var v := lo | (hi << 8)
+		if v >= 32768:
+			v -= 65536
+		out[i] = float(v) / 32768.0
+	return out
+
+
+func render_tune(name: String, seconds: float) -> PackedFloat32Array:
+	var mix := PackedFloat32Array()
+	var total := int(MIX_RATE * seconds)
+	mix.resize(total)
+	mix.fill(0.0)
+	if not TUNES.has(name):
+		return mix
+	var tune: Dictionary = TUNES[name]
+	var spb := 60.0 / float(tune.tempo)
+	for tr in tune.tracks:
+		var at := 0.0
+		var i := 0
+		var guard := 0
+		while at < seconds and guard < 4000:
+			guard += 1
+			if i >= tr.seq.size():
+				if not tune.get("loop", true):
+					break
+				i = 0
+			var ev: Array = tr.seq[i]
+			var dur: float = ev[1] * spb
+			var f := note_freq(str(ev[0]))
+			if f > 0.0:
+				var w := _stream(tr.voice, f, minf(dur * 0.95, 2.0), tr.get("bright", 8.0))
+				var s := _samples_of(w)
+				var off := int(at * MIX_RATE)
+				# tracks are written at their own level, then summed
+				var gain: float = db_to_linear(tr.vol) * 3.0
+				for k in s.size():
+					var idx := off + k
+					if idx >= total:
+						break
+					mix[idx] += s[k] * gain
+			at += dur
+			i += 1
+	# soft-clip rather than letting sums wrap round
+	for i in total:
+		mix[i] = clampf(mix[i], -1.0, 1.0)
+	return mix
+
+
+func save_wav(samples: PackedFloat32Array, path: String) -> String:
+	var data := PackedByteArray()
+	data.resize(samples.size() * 2)
+	for i in samples.size():
+		var v := int(clampf(samples[i], -1.0, 1.0) * 32000.0)
+		if v < 0:
+			v += 65536
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = MIX_RATE
+	w.stereo = false
+	w.data = data
+	var abs_path := ProjectSettings.globalize_path(path)
+	w.save_to_wav(abs_path)
+	return abs_path
+
+
+## Pitch by autocorrelation, measured over the steady middle of the note.
+##
+## Counting zero crossings was the obvious approach and it was wrong: a voice
+## built from two detuned saws an octave apart has far more crossings than its
+## fundamental, so the estimate ran high and the test blamed the synth.
+func estimate_pitch(samples: PackedFloat32Array) -> float:
+	var a := int(samples.size() * 0.15)
+	var b := int(samples.size() * 0.6)
+	if b - a < 512:
+		return 0.0
+	var win := samples.slice(a, b)
+	var n := win.size()
+	var min_lag := int(MIX_RATE / 1500.0)
+	var max_lag := mini(int(MIX_RATE / 60.0), int(n / 2))
+	var best_lag := 0
+	var best := -1.0
+	for lag in range(min_lag, max_lag):
+		var acc := 0.0
+		var count := n - lag
+		for i in count:
+			acc += win[i] * win[i + lag]
+		acc /= count
+		if acc > best:
+			best = acc
+			best_lag = lag
+	if best_lag <= 0:
+		return 0.0
+	return float(MIX_RATE) / float(best_lag)
+
+
+func rms(samples: PackedFloat32Array) -> float:
+	if samples.is_empty():
+		return 0.0
+	var acc := 0.0
+	for s in samples:
+		acc += s * s
+	return sqrt(acc / samples.size())
 
 
 func set_music_enabled(on: bool) -> void:
