@@ -2,3 +2,7 @@
 .godot/
 android/
 *.tmp
+
+# build output
+export/
+builds/
