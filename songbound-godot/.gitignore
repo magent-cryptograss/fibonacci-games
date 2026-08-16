@@ -1,8 +1,0 @@
-# Godot's import/cache directory is regenerated on open
-.godot/
-android/
-*.tmp
-
-# build output
-export/
-builds/
